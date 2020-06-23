@@ -46,6 +46,7 @@ tar = "0.4.26"
 thiserror = "1.0"
 tempfile = "3.1.0"
 lazy_static = "1.4.0"
+trees = "0.2.1"
 
 [dependencies.rocksdb]
 # Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
