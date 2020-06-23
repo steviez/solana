@@ -3792,6 +3792,7 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror",
+ "trees",
 ]
 
 [[package]]
