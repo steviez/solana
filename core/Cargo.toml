@@ -57,6 +57,7 @@ solana-measure = { path = "../measure", version = "1.1.18" }
 solana-net-utils = { path = "../net-utils", version = "1.1.18" }
 solana-chacha-cuda = { path = "../chacha-cuda", version = "1.1.18" }
 solana-perf = { path = "../perf", version = "1.1.18" }
+solana-rayon-threadlimit = { path = "../rayon-threadlimit", version = "1.1.18" }
 solana-runtime = { path = "../runtime", version = "1.1.18" }
 solana-sdk = { path = "../sdk", version = "1.1.18" }
 solana-stake-program = { path = "../programs/stake", version = "1.1.18" }
@@ -72,7 +73,13 @@ tokio = "0.1"
 tokio-codec = "0.1"
 tokio-fs = "0.1"
 tokio-io = "0.1"
-solana-rayon-threadlimit = { path = "../rayon-threadlimit", version = "1.1.18" }
+#solana-account-decoder = { path = "../account-decoder", version = "1.2.20" }
+solana-storage-bigtable = { path = "../storage-bigtable", version = "1.1.18" }
+#spl-token-v1-0 = { package = "spl-token", version = "1.0.6", features = ["skip-no-mangle"] }
+#tokio = { version = "0.2.22", features = ["full"] }
+#tokio_01 = { version = "0.1", package = "tokio" }
+#tokio_fs_01 = { version = "0.1", package = "tokio-fs" }
+#tokio_io_01 = { version = "0.1", package = "tokio-io" }
 trees = "0.2.1"
 
 [dev-dependencies]
