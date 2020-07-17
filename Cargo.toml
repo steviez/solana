@@ -24,6 +24,7 @@ members = [
     "logger",
     "log-analyzer",
     "merkle-tree",
+    "storage-bigtable",
     "measure",
     "metrics",
     "net-shaper",

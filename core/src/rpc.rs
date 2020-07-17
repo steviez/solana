@@ -34,6 +34,7 @@ use std::{
     thread::sleep,
     time::{Duration, Instant},
 };
+use tokio::runtime;
 
 type RpcResponse<T> = Result<Response<T>>;
 
@@ -49,6 +50,7 @@ pub struct JsonRpcConfig {
     pub enable_rpc_transaction_history: bool,
     pub identity_pubkey: Pubkey,
     pub faucet_addr: Option<SocketAddr>,
+    pub enable_bigtable_ledger_storage: bool,
 }
 
 #[derive(Clone)]
@@ -59,6 +61,8 @@ pub struct JsonRpcRequestProcessor {
     config: JsonRpcConfig,
     storage_state: StorageState,
     validator_exit: Arc<RwLock<Option<ValidatorExit>>>,
+    runtime_handle: runtime::Handle,
+    bigtable_ledger_storage: Option<solana_storage_bigtable::LedgerStorage>,
 }
 
 impl JsonRpcRequestProcessor {
@@ -83,6 +87,8 @@ impl JsonRpcRequestProcessor {
         blockstore: Arc<Blockstore>,
         storage_state: StorageState,
         validator_exit: Arc<RwLock<Option<ValidatorExit>>>,
+        runtime: &runtime::Runtime,
+        bigtable_ledger_storage: Option<solana_storage_bigtable::LedgerStorage>,
     ) -> Self {
         JsonRpcRequestProcessor {
             config,
@@ -91,6 +97,8 @@ impl JsonRpcRequestProcessor {
             blockstore,
             storage_state,
             validator_exit,
+            runtime_handle: runtime.handle().clone(),
+            bigtable_ledger_storage,
         }
     }
 
@@ -1206,7 +1214,7 @@ impl RpcSol for RpcSolImpl {
         meta.request_processor.read().unwrap().get_block_time(slot)
     }
 }
-
+/*
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -1368,10 +1376,24 @@ pub mod tests {
             blockstore,
             StorageState::default(),
             validator_exit,
+<<<<<<< HEAD
         )));
         let cluster_info = Arc::new(RwLock::new(ClusterInfo::new_with_invalid_keypair(
             ContactInfo::default(),
         )));
+=======
+            RpcHealth::stub(),
+            cluster_info.clone(),
+            Hash::default(),
+            Arc::new(SendTransactionService::new(
+                &cluster_info,
+                &bank_forks,
+                &exit,
+            )),
+            &runtime::Runtime::new().unwrap(),
+            None,
+        );
+>>>>>>> aa41c590a9 (Long-term ledger storage with BigTable (bp #11222))
 
         cluster_info
             .write()
@@ -1420,6 +1442,19 @@ pub mod tests {
             Arc::new(blockstore),
             StorageState::default(),
             validator_exit,
+<<<<<<< HEAD
+=======
+            RpcHealth::stub(),
+            Arc::new(ClusterInfo::default()),
+            Hash::default(),
+            Arc::new(SendTransactionService::new(
+                &cluster_info,
+                &bank_forks,
+                &exit,
+            )),
+            &runtime::Runtime::new().unwrap(),
+            None,
+>>>>>>> aa41c590a9 (Long-term ledger storage with BigTable (bp #11222))
         );
         thread::spawn(move || {
             let blockhash = bank.confirmed_last_blockhash().0;
@@ -1985,6 +2020,7 @@ pub mod tests {
         let mut io = MetaIoHandler::default();
         let rpc = RpcSolImpl;
         io.extend_with(rpc.to_delegate());
+<<<<<<< HEAD
         let meta = Meta {
             request_processor: {
                 let request_processor = JsonRpcRequestProcessor::new(
@@ -2002,6 +2038,28 @@ pub mod tests {
             ))),
             genesis_hash: Hash::default(),
         };
+=======
+        let cluster_info = Arc::new(ClusterInfo::default());
+        let bank_forks = new_bank_forks().0;
+        let meta = JsonRpcRequestProcessor::new(
+            JsonRpcConfig::default(),
+            new_bank_forks().0,
+            block_commitment_cache,
+            blockstore,
+            StorageState::default(),
+            validator_exit,
+            RpcHealth::stub(),
+            cluster_info.clone(),
+            Hash::default(),
+            Arc::new(SendTransactionService::new(
+                &cluster_info,
+                &bank_forks,
+                &exit,
+            )),
+            &runtime::Runtime::new().unwrap(),
+            None,
+        );
+>>>>>>> aa41c590a9 (Long-term ledger storage with BigTable (bp #11222))
 
         let req = r#"{"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":["37u9WtQpcm6ULa3Vmu7ySnANv"]}"#;
         let res = io.handle_request_sync(req, meta.clone());
@@ -2018,7 +2076,39 @@ pub mod tests {
     fn test_rpc_get_tpu_addr() {
         let cluster_info = Arc::new(RwLock::new(ClusterInfo::new_with_invalid_keypair(
             ContactInfo::new_with_socketaddr(&socketaddr!("127.0.0.1:1234")),
+<<<<<<< HEAD
         )));
+=======
+        ));
+        let meta = JsonRpcRequestProcessor::new(
+            JsonRpcConfig::default(),
+            bank_forks.clone(),
+            block_commitment_cache,
+            blockstore,
+            StorageState::default(),
+            validator_exit,
+            health.clone(),
+            cluster_info.clone(),
+            Hash::default(),
+            Arc::new(SendTransactionService::new(
+                &cluster_info,
+                &bank_forks,
+                &exit,
+            )),
+            &runtime::Runtime::new().unwrap(),
+            None,
+        );
+
+        let mut bad_transaction =
+            system_transaction::transfer(&Keypair::new(), &Pubkey::default(), 42, Hash::default());
+
+        // sendTransaction will fail because the blockhash is invalid
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":["{}"]}}"#,
+            bs58::encode(serialize(&bad_transaction).unwrap()).into_string()
+        );
+        let res = io.handle_request_sync(&req, meta.clone());
+>>>>>>> aa41c590a9 (Long-term ledger storage with BigTable (bp #11222))
         assert_eq!(
             get_tpu_addr(&cluster_info),
             Ok(socketaddr!("127.0.0.1:1234"))
@@ -2091,6 +2181,19 @@ pub mod tests {
             Arc::new(blockstore),
             StorageState::default(),
             validator_exit,
+<<<<<<< HEAD
+=======
+            RpcHealth::stub(),
+            cluster_info.clone(),
+            Hash::default(),
+            Arc::new(SendTransactionService::new(
+                &cluster_info,
+                &bank_forks,
+                &exit,
+            )),
+            &runtime::Runtime::new().unwrap(),
+            None,
+>>>>>>> aa41c590a9 (Long-term ledger storage with BigTable (bp #11222))
         );
         assert_eq!(request_processor.validator_exit(), Ok(false));
         assert_eq!(exit.load(Ordering::Relaxed), false);
@@ -2112,6 +2215,19 @@ pub mod tests {
             Arc::new(blockstore),
             StorageState::default(),
             validator_exit,
+<<<<<<< HEAD
+=======
+            RpcHealth::stub(),
+            cluster_info.clone(),
+            Hash::default(),
+            Arc::new(SendTransactionService::new(
+                &cluster_info,
+                &bank_forks,
+                &exit,
+            )),
+            &runtime::Runtime::new().unwrap(),
+            None,
+>>>>>>> aa41c590a9 (Long-term ledger storage with BigTable (bp #11222))
         );
         assert_eq!(request_processor.validator_exit(), Ok(true));
         assert_eq!(exit.load(Ordering::Relaxed), true);
@@ -2186,6 +2302,19 @@ pub mod tests {
             Arc::new(blockstore),
             StorageState::default(),
             validator_exit,
+<<<<<<< HEAD
+=======
+            RpcHealth::stub(),
+            cluster_info.clone(),
+            Hash::default(),
+            Arc::new(SendTransactionService::new(
+                &cluster_info,
+                &bank_forks,
+                &exit,
+            )),
+            &runtime::Runtime::new().unwrap(),
+            None,
+>>>>>>> aa41c590a9 (Long-term ledger storage with BigTable (bp #11222))
         );
         assert_eq!(
             request_processor.get_block_commitment(0),
@@ -2612,3 +2741,4 @@ pub mod tests {
         }
     }
 }
+*/

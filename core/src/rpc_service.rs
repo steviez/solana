@@ -22,7 +22,7 @@ use std::{
     sync::{mpsc::channel, Arc, RwLock},
     thread::{self, Builder, JoinHandle},
 };
-use tokio::prelude::Future;
+use tokio::runtime;
 
 pub struct JsonRpcService {
     thread_hdl: JoinHandle<()>,
@@ -31,6 +31,7 @@ pub struct JsonRpcService {
     pub request_processor: Arc<RwLock<JsonRpcRequestProcessor>>, // Used only by test_rpc_new()...
 
     close_handle: Option<CloseHandle>,
+    runtime: runtime::Runtime,
 }
 
 struct RpcRequestMiddleware {
@@ -93,10 +94,10 @@ impl RpcRequestMiddleware {
         RequestMiddlewareAction::Respond {
             should_validate_hosts: true,
             response: Box::new(
-                tokio_fs::file::File::open(filename)
+                tokio_fs_01::file::File::open(filename)
                     .and_then(|file| {
                         let buf: Vec<u8> = Vec::new();
-                        tokio_io::io::read_to_end(file, buf)
+                        tokio_io_01::io::read_to_end(file, buf)
                             .and_then(|item| Ok(hyper::Response::new(item.1.into())))
                             .or_else(|_| Ok(RpcRequestMiddleware::internal_server_error()))
                     })
@@ -164,14 +165,38 @@ impl JsonRpcService {
     ) -> Self {
         info!("rpc bound to {:?}", rpc_addr);
         info!("rpc configuration: {:?}", config);
-        let request_processor = Arc::new(RwLock::new(JsonRpcRequestProcessor::new(
+
+        let mut runtime = runtime::Builder::new()
+            .threaded_scheduler()
+            .thread_name("rpc-runtime")
+            .enable_all()
+            .build()
+            .expect("Runtime");
+
+        let bigtable_ledger_storage = if config.enable_bigtable_ledger_storage {
+            runtime
+                .block_on(solana_storage_bigtable::LedgerStorage::new(false))
+                .map(|x| {
+                    info!("BigTable ledger storage initialized");
+                    Some(x)
+                })
+                .unwrap_or_else(|err| {
+                    error!("Failed to initialize BigTable ledger storage: {:?}", err);
+                    None
+                })
+        } else {
+            None
+        };
+        let request_processor = JsonRpcRequestProcessor::new(
             config,
             bank_forks,
             block_commitment_cache,
             blockstore,
             storage_state,
             validator_exit.clone(),
-        )));
+            &runtime,
+            bigtable_ledger_storage,
+        );
 
         #[cfg(test)]
         let test_request_processor = request_processor.clone();
@@ -218,6 +243,7 @@ impl JsonRpcService {
             .register_exit(Box::new(move || close_handle_.close()));
         Self {
             thread_hdl,
+            runtime,
             #[cfg(test)]
             request_processor: test_request_processor,
             close_handle: Some(close_handle),
@@ -231,6 +257,7 @@ impl JsonRpcService {
     }
 
     pub fn join(self) -> thread::Result<()> {
+        self.runtime.shutdown_background();
         self.thread_hdl.join()
     }
 }

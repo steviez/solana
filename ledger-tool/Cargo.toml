@@ -22,6 +22,14 @@ solana-sdk = { path = "../sdk", version = "1.0.10" }
 solana-vote-program = { path = "../programs/vote", version = "1.0.10" }
 solana-stake-program = { path = "../programs/stake", version = "1.0.10" }
 tempfile = "3.1.0"
+bytecount = "0.6.0"
+futures = "0.3.5"
+futures-util = "0.3.5"
+regex = "1"
+solana-measure = { path = "../measure", version = "1.0.10" }
+solana-storage-bigtable = { path = "../storage-bigtable", version = "1.0.10" }
+#solana-version = { path = "../version", version = "1.2.20" }
+tokio = { version = "0.2.22", features = ["full"] }
 
 [dev-dependencies]
 assert_cmd = "0.12"

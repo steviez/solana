@@ -64,6 +64,8 @@ solana-storage-program = { path = "../programs/storage", version = "1.0.10" }
 solana-vote-program = { path = "../programs/vote", version = "1.0.10" }
 solana-vote-signer = { path = "../vote-signer", version = "1.0.10" }
 solana-sys-tuner = { path = "../sys-tuner", version = "1.0.10" }
+#solana-bpf-loader-program = { path = "../programs/bpf_loader", version = "1.1.18" }
+#solana-genesis-programs = { path = "../genesis-programs", version = "1.1.18" }
 tempfile = "3.1.0"
 thiserror = "1.0"
 tokio = "0.1"
@@ -71,6 +73,13 @@ tokio-codec = "0.1"
 tokio-fs = "0.1"
 tokio-io = "0.1"
 solana-rayon-threadlimit = { path = "../rayon-threadlimit", version = "1.0.10" }
+#solana-account-decoder = { path = "../account-decoder", version = "1.2.20" }
+solana-storage-bigtable = { path = "../storage-bigtable", version = "1.0.10" }
+#spl-token-v1-0 = { package = "spl-token", version = "1.0.6", features = ["skip-no-mangle"] }
+#tokio = { version = "0.2.22", features = ["full"] }
+#tokio_01 = { version = "0.1", package = "tokio" }
+#tokio_fs_01 = { version = "0.1", package = "tokio-fs" }
+#tokio_io_01 = { version = "0.1", package = "tokio-io" }
 trees = "0.2.1"
 
 [dev-dependencies]

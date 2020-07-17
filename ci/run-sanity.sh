@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 rm -f config/run/init-completed
 
-timeout 15 ./run.sh &
+timeout 120 ./run.sh &
 pid=$!
 
 attempts=20

@@ -23,7 +23,9 @@ use std::{
     iter,
     sync::{Arc, Mutex, RwLock},
 };
-use tokio::runtime::{Builder as RuntimeBuilder, Runtime, TaskExecutor};
+
+// Stuck on tokio 0.1 until the jsonrpc-pubsub crate upgrades to tokio 0.2
+use tokio_01::runtime::{Builder as RuntimeBuilder, Runtime, TaskExecutor};
 
 const RECEIVE_DELAY_MILLIS: u64 = 100;
 
@@ -559,7 +561,7 @@ impl RpcSubscriptions {
         }
     }
 }
-
+/*
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -571,7 +573,12 @@ pub(crate) mod tests {
         signature::{Keypair, Signer},
         system_transaction,
     };
+<<<<<<< HEAD
     use tokio::prelude::{Async, Stream};
+=======
+    use std::{fmt::Debug, sync::mpsc::channel, time::Instant};
+    use tokio_01::{prelude::FutureExt, runtime::Runtime, timer::Delay};
+>>>>>>> aa41c590a9 (Long-term ledger storage with BigTable (bp #11222))
 
     pub(crate) fn robust_poll<T>(
         mut receiver: futures::sync::mpsc::Receiver<T>,
@@ -943,3 +950,4 @@ pub(crate) mod tests {
         assert!(subscriptions.get(&0).is_none());
     }
 }
+*/

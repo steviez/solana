@@ -3,6 +3,8 @@ use clap::{
     ArgMatches, SubCommand,
 };
 use histogram;
+use log::*;
+use regex::Regex;
 use serde_json::json;
 use solana_clap_utils::input_validators::is_slot;
 use solana_ledger::{
@@ -30,6 +32,9 @@ use std::{
     process::{exit, Command, Stdio},
     str::FromStr,
 };
+
+mod bigtable;
+use bigtable::*;
 
 #[derive(PartialEq)]
 enum LedgerOutputMethod {
@@ -689,6 +694,7 @@ fn main() {
                 .global(true)
                 .help("Use DIR for ledger location"),
         )
+        .bigtable_subcommand()
         .subcommand(
             SubCommand::with_name("print")
             .about("Print the ledger")
@@ -912,6 +918,7 @@ fn main() {
     });
 
     match matches.subcommand() {
+        ("bigtable", Some(arg_matches)) => bigtable_process_command(&ledger_path, arg_matches),
         ("print", Some(arg_matches)) => {
             let starting_slot = value_t_or_exit!(arg_matches, "starting_slot", Slot);
             output_ledger(
