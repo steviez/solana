@@ -579,6 +579,7 @@ mod tests {
 
     #[test]
     fn test_compaction() {
+        solana_logger::setup();
         let blockstore_path = get_tmp_ledger_path!();
         let blockstore = Arc::new(Blockstore::open(&blockstore_path).unwrap());
 
@@ -598,12 +599,15 @@ mod tests {
         // send signal to cleanup slots
         let (sender, receiver) = unbounded();
         sender.send(n).unwrap();
+        let mut last_flush_slot = 0;
         let mut last_purge_slot = 0;
         let highest_compact_slot = Arc::new(AtomicU64::new(0));
         LedgerCleanupService::cleanup_ledger(
             &receiver,
             &blockstore,
             max_ledger_shreds,
+            &mut last_flush_slot,
+            20, // Flush interval > purge interval so we don't flush
             &mut last_purge_slot,
             10,
             &highest_compact_slot,

@@ -20,18 +20,35 @@ use {
     },
 };
 
-// - To try and keep the RocksDB size under 400GB:
-//   Seeing about 1600b/shred, using 2000b/shred for margin, so 200m shreds can be stored in 400gb.
-//   at 5k shreds/slot at 50k tps, this is 40k slots (~4.4 hours).
-//   At idle, 60 shreds/slot this is about 3.33m slots (~15 days)
-// This is chosen to allow enough time for
-// - A validator to download a snapshot from a peer and boot from it
-// - To make sure that if a validator needs to reboot from its own snapshot, it has enough slots locally
-//   to catch back up to where it was when it stopped
+// Notes for calculations below:
+//  Using 2000b / shred (seeing about 1600b / shred; use 2000b for margin)
+//  Using 5k shreds / slot for 50k tps load
+//  Using 60 shreds / slot for idle load
+//  Using 400ms / slot as noted by constant SLOT_MS
+
+// Cap at 200m shreds, this is chosen to allow enough time to
+// - Ensure a validator can download a snapshot from a peer and boot from it
+// - Ensure that if a validator needs to reboot from its own snapshot, it has enough
+//   slots locally to catch back up to where it was when it stopped
+// 200m shred max gives ...
+//   ~400 GB max ledger size
+//   200m / 5k = 40k slots (~4.5 hours) at 50k tps load
+//   200m / 60 = 3.33m slots (~15.4 days) at idle load
 pub const DEFAULT_MAX_LEDGER_SHREDS: u64 = 200_000_000;
 
-// Allow down to 50m, or 3.5 days at idle, 1hr at 50k load, around ~100GB
+// Allow down to 50m shreds; 50m shred max gives ...
+//   ~100gb max ledger size
+//   50m / 5k = 10k slots (just over 1 hour) at 50k tps load
+//   50m / 60 = 833k slots (3.85 days) at idle load
 pub const DEFAULT_MIN_MAX_LEDGER_SHREDS: u64 = 50_000_000;
+
+// Check for flushing shreds from cache to disk at this interval. We want recent
+// shreds in cache for quick access for replay, retransmit, etc. But, we also need
+// to bound the cache size to avoid eating too much RAM.
+// - Shreds are at most 1228 bytes, use 1500 bytes for margin
+// - 5k shreds/slot (50k TPS) * 1500 bytes = 7.5 MB / slot
+// - 7.5 MB / slot * 128 slots = 960 MB cache size
+pub const DEFAULT_FLUSH_SLOT_INTERVAL: u64 = 128;
 
 // Check for removing slots at this interval so we don't purge too often
 // and starve other blockstore users.
@@ -56,6 +73,7 @@ impl LedgerCleanupService {
         max_compaction_jitter: Option<u64>,
     ) -> Self {
         let exit = exit.clone();
+        let mut last_flush_slot = 0;
         let mut last_purge_slot = 0;
         let mut last_compaction_slot = 0;
         let mut compaction_jitter = 0;
@@ -81,6 +99,8 @@ impl LedgerCleanupService {
                     &new_root_receiver,
                     &blockstore,
                     max_ledger_shreds,
+                    &mut last_flush_slot,
+                    DEFAULT_FLUSH_SLOT_INTERVAL,
                     &mut last_purge_slot,
                     DEFAULT_PURGE_SLOT_INTERVAL,
                     &last_compact_slot,
@@ -117,6 +137,56 @@ impl LedgerCleanupService {
         }
     }
 
+    fn flush_slots(
+        blockstore: &Arc<Blockstore>,
+        root: Slot,
+        last_flush_slot: &mut u64,
+        flush_interval: u64,
+    ) -> BlockstoreResult<()> {
+        let mut flush_time = Measure::start("flush_time");
+        let data_flush_stats = blockstore.flush_data_shreds_to_fs(root - flush_interval)?;
+        let coding_flush_stats = blockstore.flush_coding_shreds_to_fs(root - flush_interval)?;
+        flush_time.stop();
+
+        *last_flush_slot = root;
+
+        datapoint_info!(
+            "ledger_cleanup_flush_shreds",
+            (
+                "num_data_slots_flushed",
+                data_flush_stats.num_slots_flushed as i64,
+                i64
+            ),
+            (
+                "num_data_slots_merged",
+                data_flush_stats.num_slots_flushed as i64,
+                i64
+            ),
+            (
+                "num_data_shreds_flushed",
+                data_flush_stats.num_shreds_flushed as i64,
+                i64
+            ),
+            (
+                "num_coding_slots_flushed",
+                coding_flush_stats.num_slots_flushed as i64,
+                i64
+            ),
+            (
+                "num_coding_slots_merged",
+                coding_flush_stats.num_slots_merged as i64,
+                i64
+            ),
+            (
+                "num_coding_shreds_flushed",
+                coding_flush_stats.num_shreds_flushed as i64,
+                i64
+            ),
+            ("flush_time_us", flush_time.as_us() as i64, i64)
+        );
+        Ok(())
+    }
+
     fn find_slots_to_clean(
         blockstore: &Arc<Blockstore>,
         root: Slot,
@@ -150,11 +220,12 @@ impl LedgerCleanupService {
         if (total_shreds as u64) < max_ledger_shreds {
             return (false, 0, 0, total_shreds);
         }
-        let mut num_shreds_to_clean = 0;
+        let mut num_shreds_to_keep = 0;
         let mut lowest_cleanup_slot = total_slots[0].0;
+        // Iterate through total_slots in reverse so we keep most recent slots
         for (slot, num_shreds) in total_slots.iter().rev() {
-            num_shreds_to_clean += *num_shreds as u64;
-            if num_shreds_to_clean > max_ledger_shreds {
+            num_shreds_to_keep += *num_shreds as u64;
+            if num_shreds_to_keep > max_ledger_shreds {
                 lowest_cleanup_slot = *slot;
                 break;
             }
@@ -173,11 +244,21 @@ impl LedgerCleanupService {
         new_root_receiver: &Receiver<Slot>,
         blockstore: &Arc<Blockstore>,
         max_ledger_shreds: u64,
+        last_flush_slot: &mut u64,
+        flush_interval: u64,
         last_purge_slot: &mut u64,
         purge_interval: u64,
         last_compact_slot: &Arc<AtomicU64>,
     ) -> Result<(), RecvTimeoutError> {
         let root = Self::receive_new_roots(new_root_receiver)?;
+
+        // Flush interval is shorter than purge interval, so check this one first
+        if root - *last_flush_slot > flush_interval {
+            let _ = Self::flush_slots(&blockstore.clone(), root, last_flush_slot, flush_interval);
+            // Some slots have been persisted, see if any WAL's can now be cleaned out
+            blockstore.purge_shred_logs(*last_flush_slot);
+        }
+
         if root - *last_purge_slot <= purge_interval {
             return Ok(());
         }
@@ -327,6 +408,7 @@ mod tests {
         let (sender, receiver) = unbounded();
 
         //send a signal to kill all but 5 shreds, which will be in the newest slots
+        let mut last_flush_slot = 0;
         let mut last_purge_slot = 0;
         let highest_compaction_slot = Arc::new(AtomicU64::new(0));
         sender.send(50).unwrap();
@@ -334,6 +416,8 @@ mod tests {
             &receiver,
             &blockstore,
             5,
+            &mut last_flush_slot,
+            20, // Flush interval > purge interval so we don't flush in this test
             &mut last_purge_slot,
             10,
             &highest_compaction_slot,
@@ -381,6 +465,7 @@ mod tests {
         first_insert.stop();
         info!("{}", first_insert);
 
+        let mut last_flush_slot = 0;
         let mut last_purge_slot = 0;
         let last_compaction_slot = Arc::new(AtomicU64::new(0));
         let mut slot = initial_slots;
@@ -404,6 +489,8 @@ mod tests {
                 &receiver,
                 &blockstore,
                 initial_slots,
+                &mut last_flush_slot,
+                20, // Flush interval > purge interval so we don't flush in this test
                 &mut last_purge_slot,
                 10,
                 &last_compaction_slot,
@@ -416,6 +503,63 @@ mod tests {
             );
             slot += num_slots;
             num_slots *= 2;
+        }
+
+        drop(blockstore);
+        Blockstore::destroy(&blockstore_path).expect("Expected successful database destruction");
+    }
+
+    #[test]
+    fn test_cleanup_shred_cache_flush() {
+        solana_logger::setup();
+        let blockstore_path = get_tmp_ledger_path!();
+        let blockstore = Blockstore::open(&blockstore_path).unwrap();
+        let (shreds, _) = make_many_slot_entries(0, 50, 5);
+        let num_shreds = shreds.len();
+        blockstore
+            .insert_shreds(shreds.clone(), None, false)
+            .unwrap();
+        let blockstore = Arc::new(blockstore);
+        let (sender, receiver) = channel();
+
+        // Send a signal that slot 50 has been rooted; with a flush interval
+        // of 10, slot 0 - 39 should get flushed from the cache
+        let mut last_flush_slot = 0;
+        let mut last_purge_slot = 0;
+        let highest_compaction_slot = Arc::new(AtomicU64::new(0));
+        sender.send(50).unwrap();
+        LedgerCleanupService::cleanup_ledger(
+            &receiver,
+            &blockstore,
+            // Large enough to fit all shreds
+            (num_shreds * 2).try_into().unwrap(),
+            &mut last_flush_slot,
+            10,
+            &mut last_purge_slot,
+            // Large enough that purge won't occur
+            100,
+            &highest_compaction_slot,
+        )
+        .unwrap();
+
+        assert_eq!(last_flush_slot, 50);
+        assert_eq!(last_purge_slot, 0);
+        assert_eq!(highest_compaction_slot.load(Ordering::Relaxed), 0);
+
+        // Confirm slots were flushed
+        for shred in shreds.iter() {
+            match shred.slot() {
+                0..=39 => {
+                    assert!(!blockstore.is_data_shred_in_cache(shred.slot(), shred.index().into()));
+                }
+                40..=49 => {
+                    assert!(blockstore.is_data_shred_in_cache(shred.slot(), shred.index().into()));
+                }
+                _ => {
+                    // Only slot 0 - 49 were created / inserted
+                    unreachable!();
+                }
+            }
         }
 
         drop(blockstore);

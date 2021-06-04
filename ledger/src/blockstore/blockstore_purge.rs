@@ -4,6 +4,7 @@ use {super::*, std::time::Instant};
 pub struct PurgeStats {
     delete_range: u64,
     write_batch: u64,
+    delete_shreds: u64,
 }
 
 impl Blockstore {
@@ -13,6 +14,7 @@ impl Blockstore {
     /// Modifies multiple column families simultaneously
     pub fn purge_slots(&self, from_slot: Slot, to_slot: Slot, purge_type: PurgeType) {
         let mut purge_stats = PurgeStats::default();
+        error!("Purge from slot {} to slot {}", from_slot, to_slot);
         let purge_result =
             self.run_purge_with_stats(from_slot, to_slot, purge_type, &mut purge_stats);
 
@@ -21,7 +23,8 @@ impl Blockstore {
             ("from_slot", from_slot as i64, i64),
             ("to_slot", to_slot as i64, i64),
             ("delete_range_us", purge_stats.delete_range as i64, i64),
-            ("write_batch_us", purge_stats.write_batch as i64, i64)
+            ("write_batch_us", purge_stats.write_batch as i64, i64),
+            ("delete_shreds_us", purge_stats.delete_shreds as i64, i64)
         );
         if let Err(e) = purge_result {
             error!(
@@ -29,6 +32,13 @@ impl Blockstore {
                 e, from_slot, to_slot
             );
         }
+    }
+
+    /// Deletes any shred log files that contain shreds from slot(s) <= last_flush_slot
+    /// The caller of this function must konw what slots have ben flushed, so the only
+    /// current legal user of this function is LedgerCleanupService.
+    pub fn purge_shred_logs(&self, last_flush_slot: Slot) {
+        self.shred_wal.lock().unwrap().purge_logs(last_flush_slot);
     }
 
     /// Usually this is paired with .purge_slots() but we can't internally call this in
@@ -129,6 +139,14 @@ impl Blockstore {
         // delete range cf is not inclusive
         let to_slot = to_slot.saturating_add(1);
 
+        // Write the log first; if the purge fails midway through, it is better to have
+        // the purge recorded in log and have some extraneous data than to be "missing"
+        // data and not have the purge recorded
+        self.shred_wal
+            .lock()
+            .unwrap()
+            .log_shred_purge(from_slot..to_slot)?;
+
         let mut delete_range_timer = Measure::start("delete_range");
         let mut columns_purged = self
             .db
@@ -141,14 +159,6 @@ impl Blockstore {
             & self
                 .db
                 .delete_range_cf::<cf::Root>(&mut write_batch, from_slot, to_slot)
-                .is_ok()
-            & self
-                .db
-                .delete_range_cf::<cf::ShredData>(&mut write_batch, from_slot, to_slot)
-                .is_ok()
-            & self
-                .db
-                .delete_range_cf::<cf::ShredCode>(&mut write_batch, from_slot, to_slot)
                 .is_ok()
             & self
                 .db
@@ -209,6 +219,7 @@ impl Blockstore {
             }
         }
         delete_range_timer.stop();
+
         let mut write_timer = Measure::start("write_batch");
         if let Err(e) = self.db.write(write_batch) {
             error!(
@@ -218,8 +229,16 @@ impl Blockstore {
             return Err(e);
         }
         write_timer.stop();
+
+        let mut delete_shred_timer = Measure::start("delete_shreds");
+        self.delete_code_shreds(from_slot, to_slot);
+        self.delete_data_shreds(from_slot, to_slot);
+        delete_shred_timer.stop();
+
         purge_stats.delete_range += delete_range_timer.as_us();
         purge_stats.write_batch += write_timer.as_us();
+        purge_stats.delete_shreds += delete_shred_timer.as_us();
+
         // only drop w_active_transaction_status_index after we do db.write(write_batch);
         // otherwise, readers might be confused with inconsistent state between
         // self.active_transaction_status_index and RockDb's TransactionStatusIndex contents
@@ -241,14 +260,6 @@ impl Blockstore {
             && self
                 .db
                 .column::<cf::Root>()
-                .compact_range(from_slot, to_slot)
-                .unwrap_or(false)
-            && self
-                .data_shred_cf
-                .compact_range(from_slot, to_slot)
-                .unwrap_or(false)
-            && self
-                .code_shred_cf
                 .compact_range(from_slot, to_slot)
                 .unwrap_or(false)
             && self
@@ -425,13 +436,6 @@ pub mod tests {
                 .unwrap()
                 .next()
                 .map(|(slot, _)| slot >= min_slot)
-                .unwrap_or(true)
-            & blockstore
-                .db
-                .iter::<cf::ShredData>(IteratorMode::Start)
-                .unwrap()
-                .next()
-                .map(|((slot, _), _)| slot >= min_slot)
                 .unwrap_or(true)
             & blockstore
                 .db

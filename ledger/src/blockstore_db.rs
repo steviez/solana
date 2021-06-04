@@ -305,6 +305,7 @@ impl Rocks {
             new_cf_descriptor::<BankHash>(&access_type, &oldest_slot),
             new_cf_descriptor::<Root>(&access_type, &oldest_slot),
             new_cf_descriptor::<Index>(&access_type, &oldest_slot),
+            // Keep shred CF's around to open existing ledgers
             new_cf_descriptor::<ShredData>(&access_type, &oldest_slot),
             new_cf_descriptor::<ShredCode>(&access_type, &oldest_slot),
             new_cf_descriptor::<TransactionStatus>(&access_type, &oldest_slot),
