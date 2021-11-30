@@ -14,10 +14,10 @@ use std::path::Path;
 use test::Bencher;
 
 // Given some shreds and a ledger at ledger_path, benchmark writing the shreds to the ledger
-fn bench_write_shreds(bench: &mut Bencher, entries: Vec<Entry>, ledger_path: &Path) {
+fn bench_write_shreds(bencher: &mut Bencher, entries: Vec<Entry>, ledger_path: &Path) {
     let blockstore = Blockstore::open(ledger_path).unwrap();
 
-    bench.iter(move || {
+    bencher.iter(move || {
         let shreds = entries_to_test_shreds(entries.clone(), 0, 0, true, 0);
         blockstore.insert_shreds(shreds, None, false).unwrap();
     });
@@ -47,28 +47,28 @@ fn setup_read_bench(
 // Write small shreds to the ledger
 #[bench]
 #[ignore]
-fn bench_write_small(bench: &mut Bencher) {
+fn bench_write_small(bencher: &mut Bencher) {
     let ledger_path = get_tmp_ledger_path_auto_delete!();
 
     let num_entries = 32 * 1024;
     let entries = create_ticks(num_entries, 0, Hash::default());
-    bench_write_shreds(bench, entries, ledger_path.path());
+    bench_write_shreds(bencher, entries, ledger_path.path());
 }
 
 // Write big shreds to the ledger
 #[bench]
 #[ignore]
-fn bench_write_big(bench: &mut Bencher) {
+fn bench_write_big(bencher: &mut Bencher) {
     let ledger_path = get_tmp_ledger_path_auto_delete!();
 
     let num_entries = 32 * 1024;
     let entries = create_ticks(num_entries, 0, Hash::default());
-    bench_write_shreds(bench, entries, ledger_path.path());
+    bench_write_shreds(bencher, entries, ledger_path.path());
 }
 
 #[bench]
 #[ignore]
-fn bench_read_sequential(bench: &mut Bencher) {
+fn bench_read_sequential(bencher: &mut Bencher) {
     let ledger_path = get_tmp_ledger_path_auto_delete!();
     let blockstore = Blockstore::open(ledger_path.path()).unwrap();
 
@@ -81,7 +81,7 @@ fn bench_read_sequential(bench: &mut Bencher) {
 
     let num_reads = total_shreds / 15;
     let mut rng = rand::thread_rng();
-    bench.iter(move || {
+    bencher.iter(move || {
         // Generate random starting point in the range [0, total_shreds - 1], read num_reads shreds sequentially
         let start_index = rng.gen_range(0, num_small_shreds + num_large_shreds);
         for i in start_index..start_index + num_reads {
@@ -92,7 +92,7 @@ fn bench_read_sequential(bench: &mut Bencher) {
 
 #[bench]
 #[ignore]
-fn bench_read_random(bench: &mut Bencher) {
+fn bench_read_random(bencher: &mut Bencher) {
     let ledger_path = get_tmp_ledger_path_auto_delete!();
     let blockstore = Blockstore::open(ledger_path.path()).unwrap();
 
@@ -111,7 +111,7 @@ fn bench_read_random(bench: &mut Bencher) {
     let indexes: Vec<usize> = (0..num_reads)
         .map(|_| rng.gen_range(0, total_shreds) as usize)
         .collect();
-    bench.iter(move || {
+    bencher.iter(move || {
         for i in indexes.iter() {
             let _ = blockstore.get_data_shred(slot, *i as u64);
         }
@@ -120,13 +120,13 @@ fn bench_read_random(bench: &mut Bencher) {
 
 #[bench]
 #[ignore]
-fn bench_insert_data_shred_small(bench: &mut Bencher) {
+fn bench_insert_data_shred_small(bencher: &mut Bencher) {
     let ledger_path = get_tmp_ledger_path_auto_delete!();
     let blockstore = Blockstore::open(ledger_path.path()).unwrap();
 
     let num_entries = 32 * 1024;
     let entries = create_ticks(num_entries, 0, Hash::default());
-    bench.iter(move || {
+    bencher.iter(move || {
         let shreds = entries_to_test_shreds(entries.clone(), 0, 0, true, 0);
         blockstore.insert_shreds(shreds, None, false).unwrap();
     });
@@ -134,13 +134,13 @@ fn bench_insert_data_shred_small(bench: &mut Bencher) {
 
 #[bench]
 #[ignore]
-fn bench_insert_data_shred_big(bench: &mut Bencher) {
+fn bench_insert_data_shred_big(bencher: &mut Bencher) {
     let ledger_path = get_tmp_ledger_path_auto_delete!();
     let blockstore = Blockstore::open(ledger_path.path()).unwrap();
 
     let num_entries = 32 * 1024;
     let entries = create_ticks(num_entries, 0, Hash::default());
-    bench.iter(move || {
+    bencher.iter(move || {
         let shreds = entries_to_test_shreds(entries.clone(), 0, 0, true, 0);
         blockstore.insert_shreds(shreds, None, false).unwrap();
     });
