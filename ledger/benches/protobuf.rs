@@ -6,7 +6,7 @@ use bincode::{deserialize, serialize};
 use solana_ledger::{
     blockstore::Blockstore,
     blockstore_db::{columns as cf, LedgerColumn},
-    get_tmp_ledger_path,
+    get_tmp_ledger_path_auto_delete,
 };
 use solana_runtime::bank::RewardType;
 use solana_sdk::{clock::Slot, pubkey};
@@ -60,7 +60,6 @@ where
         write_method(&rewards_cf, slot, rewards.clone());
         slot += 1;
     });
-    Blockstore::destroy(ledger_path).expect("Expected successful database destruction");
 }
 
 fn bench_read_rewards<F, G>(
@@ -79,27 +78,26 @@ fn bench_read_rewards<F, G>(
     let rewards_cf = blockstore.db().column::<cf::Rewards>();
     write_method(&rewards_cf, slot, rewards);
     bench.iter(move || read_method(&rewards_cf, slot));
-    Blockstore::destroy(ledger_path).expect("Expected successful database destruction");
 }
 
 #[bench]
 fn bench_serialize_write_bincode(bencher: &mut Bencher) {
-    let ledger_path = get_tmp_ledger_path!();
-    bench_write_rewards(bencher, &ledger_path, write_bincode_rewards);
+    let ledger_path = get_tmp_ledger_path_auto_delete!();
+    bench_write_rewards(bencher, ledger_path.path(), write_bincode_rewards);
 }
 
 #[bench]
 fn bench_serialize_write_protobuf(bencher: &mut Bencher) {
-    let ledger_path = get_tmp_ledger_path!();
-    bench_write_rewards(bencher, &ledger_path, write_protobuf_rewards);
+    let ledger_path = get_tmp_ledger_path_auto_delete!();
+    bench_write_rewards(bencher, ledger_path.path(), write_protobuf_rewards);
 }
 
 #[bench]
 fn bench_read_bincode(bencher: &mut Bencher) {
-    let ledger_path = get_tmp_ledger_path!();
+    let ledger_path = get_tmp_ledger_path_auto_delete!();
     bench_read_rewards(
         bencher,
-        &ledger_path,
+        ledger_path.path(),
         write_bincode_rewards,
         read_bincode_rewards,
     );
@@ -107,10 +105,10 @@ fn bench_read_bincode(bencher: &mut Bencher) {
 
 #[bench]
 fn bench_read_protobuf(bencher: &mut Bencher) {
-    let ledger_path = get_tmp_ledger_path!();
+    let ledger_path = get_tmp_ledger_path_auto_delete!();
     bench_read_rewards(
         bencher,
-        &ledger_path,
+        ledger_path.path(),
         write_protobuf_rewards,
         read_protobuf_rewards,
     );
