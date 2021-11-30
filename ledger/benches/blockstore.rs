@@ -25,7 +25,7 @@ fn bench_write_shreds(bench: &mut Bencher, entries: Vec<Entry>, ledger_path: &Pa
 
 // Insert some shreds into the ledger in preparation for read benchmarks
 fn setup_read_bench(
-    blockstore: &mut Blockstore,
+    blockstore: &Blockstore,
     num_small_shreds: u64,
     num_large_shreds: u64,
     slot: Slot,
@@ -70,14 +70,14 @@ fn bench_write_big(bench: &mut Bencher) {
 #[ignore]
 fn bench_read_sequential(bench: &mut Bencher) {
     let ledger_path = get_tmp_ledger_path_auto_delete!();
-    let mut blockstore = Blockstore::open(ledger_path.path()).unwrap();
+    let blockstore = Blockstore::open(ledger_path.path()).unwrap();
 
     // Insert some big and small shreds into the ledger
     let num_small_shreds = 32 * 1024;
     let num_large_shreds = 32 * 1024;
     let total_shreds = num_small_shreds + num_large_shreds;
     let slot = 0;
-    setup_read_bench(&mut blockstore, num_small_shreds, num_large_shreds, slot);
+    setup_read_bench(&blockstore, num_small_shreds, num_large_shreds, slot);
 
     let num_reads = total_shreds / 15;
     let mut rng = rand::thread_rng();
@@ -94,14 +94,14 @@ fn bench_read_sequential(bench: &mut Bencher) {
 #[ignore]
 fn bench_read_random(bench: &mut Bencher) {
     let ledger_path = get_tmp_ledger_path_auto_delete!();
-    let mut blockstore = Blockstore::open(ledger_path.path()).unwrap();
+    let blockstore = Blockstore::open(ledger_path.path()).unwrap();
 
     // Insert some big and small shreds into the ledger
     let num_small_shreds = 32 * 1024;
     let num_large_shreds = 32 * 1024;
     let total_shreds = num_small_shreds + num_large_shreds;
     let slot = 0;
-    setup_read_bench(&mut blockstore, num_small_shreds, num_large_shreds, slot);
+    setup_read_bench(&blockstore, num_small_shreds, num_large_shreds, slot);
 
     let num_reads = total_shreds / 15;
 
