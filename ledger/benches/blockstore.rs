@@ -8,18 +8,32 @@ use solana_entry::entry::{create_ticks, Entry};
 use solana_ledger::{
     blockstore::{entries_to_test_shreds, Blockstore},
     get_tmp_ledger_path_auto_delete,
+    shred::max_ticks_per_n_shreds,
 };
 use solana_sdk::{clock::Slot, hash::Hash};
-use std::path::Path;
 use test::Bencher;
 
-// Given some shreds and a ledger at ledger_path, benchmark writing the shreds to the ledger
-fn bench_write_shreds(bencher: &mut Bencher, entries: Vec<Entry>, ledger_path: &Path) {
-    let blockstore = Blockstore::open(ledger_path).unwrap();
+// Create the entries necessary to occupy `num_shreds` shreds
+fn create_entries_for_n_shreds(num_shreds: u64) -> Vec<Entry> {
+    // Use `None` as shred_size so the default (full) value is used
+    let num_ticks = max_ticks_per_n_shreds(num_shreds, None);
+    create_ticks(num_ticks, 0, Hash::default())
+}
 
+// Given some shreds and a ledger at ledger_path, benchmark writing the shreds to the ledger
+fn do_bench_write_shreds(bencher: &mut Bencher, num_shreds: u64) {
+    let ledger_path = get_tmp_ledger_path_auto_delete!();
+    let blockstore = Blockstore::open(ledger_path.path()).unwrap();
+    let entries = create_entries_for_n_shreds(num_shreds);
+
+    let mut slot = 0;
+    //let mut metrics = BlockstoreInsertionMetrics::default();
     bencher.iter(move || {
-        let shreds = entries_to_test_shreds(entries.clone(), 0, 0, true, 0);
+        let shreds = entries_to_test_shreds(entries.clone(), slot, slot.saturating_sub(1), true, 0);
+        let shreds_len = shreds.len();
         blockstore.insert_shreds(shreds, None, false).unwrap();
+        // Increment slot as we go since duplicates get thrown out
+        slot += 1;
     });
 }
 
@@ -44,26 +58,11 @@ fn setup_read_bench(
         .expect("Expectd successful insertion of shreds into ledger");
 }
 
-// Write small shreds to the ledger
 #[bench]
 #[ignore]
-fn bench_write_small(bencher: &mut Bencher) {
-    let ledger_path = get_tmp_ledger_path_auto_delete!();
-
-    let num_entries = 32 * 1024;
-    let entries = create_ticks(num_entries, 0, Hash::default());
-    bench_write_shreds(bencher, entries, ledger_path.path());
-}
-
-// Write big shreds to the ledger
-#[bench]
-#[ignore]
-fn bench_write_big(bencher: &mut Bencher) {
-    let ledger_path = get_tmp_ledger_path_auto_delete!();
-
-    let num_entries = 32 * 1024;
-    let entries = create_ticks(num_entries, 0, Hash::default());
-    bench_write_shreds(bencher, entries, ledger_path.path());
+fn bench_write_shreds_1000_per_slot(bencher: &mut Bencher) {
+    solana_logger::setup();
+    do_bench_write_shreds(bencher, 1000);
 }
 
 #[bench]
@@ -115,33 +114,5 @@ fn bench_read_random(bencher: &mut Bencher) {
         for i in indexes.iter() {
             let _ = blockstore.get_data_shred(slot, *i as u64);
         }
-    });
-}
-
-#[bench]
-#[ignore]
-fn bench_insert_data_shred_small(bencher: &mut Bencher) {
-    let ledger_path = get_tmp_ledger_path_auto_delete!();
-    let blockstore = Blockstore::open(ledger_path.path()).unwrap();
-
-    let num_entries = 32 * 1024;
-    let entries = create_ticks(num_entries, 0, Hash::default());
-    bencher.iter(move || {
-        let shreds = entries_to_test_shreds(entries.clone(), 0, 0, true, 0);
-        blockstore.insert_shreds(shreds, None, false).unwrap();
-    });
-}
-
-#[bench]
-#[ignore]
-fn bench_insert_data_shred_big(bencher: &mut Bencher) {
-    let ledger_path = get_tmp_ledger_path_auto_delete!();
-    let blockstore = Blockstore::open(ledger_path.path()).unwrap();
-
-    let num_entries = 32 * 1024;
-    let entries = create_ticks(num_entries, 0, Hash::default());
-    bencher.iter(move || {
-        let shreds = entries_to_test_shreds(entries.clone(), 0, 0, true, 0);
-        blockstore.insert_shreds(shreds, None, false).unwrap();
     });
 }
