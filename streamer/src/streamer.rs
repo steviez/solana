@@ -3,7 +3,7 @@
 
 use {
     crate::{
-        packet::{self, send_to, Packets, PacketsRecycler, PACKETS_PER_BATCH},
+        packet::{self, send_to, PacketInterface, Packet, Packets, PacketsRecycler, PACKETS_PER_BATCH},
         recvmmsg::NUM_RCVMMSGS,
         socket::SocketAddrSpace,
     },
@@ -21,11 +21,15 @@ use {
     thiserror::Error,
 };
 
-pub type PacketReceiver = Receiver<Packets>;
-pub type PacketSender = Sender<Packets>;
+pub type PacketReceiver<P> = Receiver<Packets<P>>;
+pub type PacketSender<P> = Sender<Packets<P>>;
+
+pub type StandardPacketReceiver = PacketReceiver<Packet>;
+pub type StandardPacketSender = PacketSender<Packet>;
+
 
 #[derive(Error, Debug)]
-pub enum StreamerError {
+pub enum StreamerError<P: PacketInterface> {
     #[error("I/O error")]
     Io(#[from] std::io::Error),
 
@@ -33,20 +37,20 @@ pub enum StreamerError {
     RecvTimeout(#[from] RecvTimeoutError),
 
     #[error("send packets error")]
-    Send(#[from] SendError<Packets>),
+    Send(#[from] SendError<Packets<P>>),
 }
 
-pub type Result<T> = std::result::Result<T, StreamerError>;
+pub type Result<T, P> = std::result::Result<T, StreamerError<P>>;
 
-fn recv_loop(
+fn recv_loop<P: PacketInterface>(
     sock: &UdpSocket,
     exit: Arc<AtomicBool>,
-    channel: &PacketSender,
-    recycler: &PacketsRecycler,
+    channel: &PacketSender<P>,
+    recycler: &PacketsRecycler<P>,
     name: &'static str,
     coalesce_ms: u64,
     use_pinned_memory: bool,
-) -> Result<()> {
+) -> Result<(), P> {
     let mut recv_count = 0;
     let mut call_count = 0;
     let mut now = Instant::now();
@@ -91,11 +95,11 @@ fn recv_loop(
     }
 }
 
-pub fn receiver(
+pub fn receiver<P: 'static + PacketInterface>(
     sock: Arc<UdpSocket>,
     exit: &Arc<AtomicBool>,
-    packet_sender: PacketSender,
-    recycler: PacketsRecycler,
+    packet_sender: PacketSender<P>,
+    recycler: PacketsRecycler<P>,
     name: &'static str,
     coalesce_ms: u64,
     use_pinned_memory: bool,
@@ -119,18 +123,20 @@ pub fn receiver(
         .unwrap()
 }
 
-fn recv_send(
+fn recv_send<P: PacketInterface>(
     sock: &UdpSocket,
-    r: &PacketReceiver,
+    r: &PacketReceiver<P>,
     socket_addr_space: &SocketAddrSpace,
-) -> Result<()> {
+) -> Result<(), P> {
     let timer = Duration::new(1, 0);
     let msgs = r.recv_timeout(timer)?;
     send_to(&msgs, sock, socket_addr_space)?;
     Ok(())
 }
 
-pub fn recv_batch(recvr: &PacketReceiver) -> Result<(Vec<Packets>, usize, Duration)> {
+pub fn recv_batch<P: PacketInterface>(
+    recvr: &PacketReceiver<P>,
+) -> Result<(Vec<Packets<P>>, usize, Duration), P> {
     let timer = Duration::new(1, 0);
     let msgs = recvr.recv_timeout(timer)?;
     let recv_start = Instant::now();
@@ -147,10 +153,10 @@ pub fn recv_batch(recvr: &PacketReceiver) -> Result<(Vec<Packets>, usize, Durati
     Ok((batch, len, recv_duration))
 }
 
-pub fn responder(
+pub fn responder<P: 'static + PacketInterface>(
     name: &'static str,
     sock: Arc<UdpSocket>,
-    r: PacketReceiver,
+    r: PacketReceiver<P>,
     socket_addr_space: SocketAddrSpace,
 ) -> JoinHandle<()> {
     Builder::new()

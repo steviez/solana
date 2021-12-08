@@ -1,5 +1,5 @@
 //! The `packet` module defines data structures and methods to pull data from the network.
-pub use solana_sdk::packet::{Meta, Packet, PACKET_DATA_SIZE};
+pub use solana_sdk::packet::{Meta, Packet, PacketInterface, PACKET_DATA_SIZE};
 use {
     crate::{cuda_runtime::PinnedVec, recycler::Recycler},
     bincode::config::Options,
@@ -13,43 +13,46 @@ pub const PACKETS_PER_BATCH: usize = 128;
 pub const NUM_RCVMMSGS: usize = 128;
 
 #[derive(Debug, Default, Clone)]
-pub struct Packets {
-    pub packets: PinnedVec<Packet>,
+pub struct Packets<P: PacketInterface> {
+    pub packets: PinnedVec<P>,
 }
 
-pub type PacketsRecycler = Recycler<PinnedVec<Packet>>;
+pub type StandardPackets = Packets<Packet>;
 
-impl Packets {
-    pub fn new(packets: Vec<Packet>) -> Self {
+pub type PacketsRecycler<P> = Recycler<PinnedVec<P>>;
+pub type StandardPacketsRecycler = PacketsRecycler<Packet>;
+
+impl<P: PacketInterface> Packets<P> {
+    pub fn new(packets: Vec<P>) -> Self {
         let packets = PinnedVec::from_vec(packets);
         Self { packets }
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
         let packets = PinnedVec::with_capacity(capacity);
-        Packets { packets }
+        Self { packets }
     }
 
     pub fn new_unpinned_with_recycler(
-        recycler: PacketsRecycler,
+        recycler: PacketsRecycler<P>,
         size: usize,
         name: &'static str,
     ) -> Self {
         let mut packets = recycler.allocate(name);
         packets.reserve(size);
-        Packets { packets }
+        Self { packets }
     }
 
-    pub fn new_with_recycler(recycler: PacketsRecycler, size: usize, name: &'static str) -> Self {
+    pub fn new_with_recycler(recycler: PacketsRecycler<P>, size: usize, name: &'static str) -> Self {
         let mut packets = recycler.allocate(name);
         packets.reserve_and_pin(size);
-        Packets { packets }
+        Self { packets }
     }
 
     pub fn new_with_recycler_data(
-        recycler: &PacketsRecycler,
+        recycler: &PacketsRecycler<P>,
         name: &'static str,
-        mut packets: Vec<Packet>,
+        mut packets: Vec<P>,
     ) -> Self {
         let mut vec = Self::new_with_recycler(recycler.clone(), packets.len(), name);
         vec.packets.append(&mut packets);
@@ -57,9 +60,9 @@ impl Packets {
     }
 
     pub fn new_unpinned_with_recycler_data(
-        recycler: &PacketsRecycler,
+        recycler: &PacketsRecycler<P>,
         name: &'static str,
-        mut packets: Vec<Packet>,
+        mut packets: Vec<P>,
     ) -> Self {
         let mut vec = Self::new_unpinned_with_recycler(recycler.clone(), packets.len(), name);
         vec.packets.append(&mut packets);
@@ -68,7 +71,7 @@ impl Packets {
 
     pub fn set_addr(&mut self, addr: &SocketAddr) {
         for m in self.packets.iter_mut() {
-            m.meta.set_addr(addr);
+            m.get_meta_mut().set_addr(addr);
         }
     }
 
@@ -77,13 +80,13 @@ impl Packets {
     }
 }
 
-pub fn to_packets_chunked<T: Serialize>(xs: &[T], chunks: usize) -> Vec<Packets> {
+pub fn to_packets_chunked<T: Serialize, P: PacketInterface>(xs: &[T], chunks: usize) -> Vec<Packets<P>> {
     let mut out = vec![];
     for x in xs.chunks(chunks) {
         let mut p = Packets::with_capacity(x.len());
-        p.packets.resize(x.len(), Packet::default());
+        p.packets.resize(x.len(), P::default());
         for (i, o) in x.iter().zip(p.packets.iter_mut()) {
-            Packet::populate_packet(o, None, i).expect("serialize request");
+            P::populate_packet(o, None, i).expect("serialize request");
         }
         out.push(p);
     }
@@ -95,19 +98,19 @@ pub fn to_packets<T: Serialize>(xs: &[T]) -> Vec<Packets> {
     to_packets_chunked(xs, NUM_PACKETS)
 }
 
-pub fn to_packets_with_destination<T: Serialize>(
-    recycler: PacketsRecycler,
+pub fn to_packets_with_destination<T: Serialize, P: PacketInterface>(
+    recycler: PacketsRecycler<P>,
     dests_and_data: &[(SocketAddr, T)],
-) -> Packets {
+) -> Packets<P> {
     let mut out = Packets::new_unpinned_with_recycler(
         recycler,
         dests_and_data.len(),
         "to_packets_with_destination",
     );
-    out.packets.resize(dests_and_data.len(), Packet::default());
+    out.packets.resize(dests_and_data.len(), P::default());
     for (dest_and_data, o) in dests_and_data.iter().zip(out.packets.iter_mut()) {
         if !dest_and_data.0.ip().is_unspecified() && dest_and_data.0.port() != 0 {
-            if let Err(e) = Packet::populate_packet(o, Some(&dest_and_data.0), &dest_and_data.1) {
+            if let Err(e) = P::populate_packet(o, Some(&dest_and_data.0), &dest_and_data.1) {
                 // TODO: This should never happen. Instead the caller should
                 // break the payload into smaller messages, and here any errors
                 // should be propagated.

@@ -9,9 +9,9 @@ use {
     crate::sigverify,
     crossbeam_channel::{SendError, Sender as CrossbeamSender},
     solana_measure::measure::Measure,
-    solana_perf::packet::Packets,
+    solana_perf::packet::StandardPackets,
     solana_sdk::timing,
-    solana_streamer::streamer::{self, PacketReceiver, StreamerError},
+    solana_streamer::streamer::{self, StandardPacketReceiver, StreamerError},
     std::{
         collections::HashMap,
         sync::mpsc::{Receiver, RecvTimeoutError},
@@ -26,7 +26,7 @@ const MAX_SIGVERIFY_BATCH: usize = 10_000;
 #[derive(Error, Debug)]
 pub enum SigVerifyServiceError {
     #[error("send packets batch error")]
-    Send(#[from] SendError<Vec<Packets>>),
+    Send(#[from] SendError<Vec<StandardPackets>>),
 
     #[error("streamer error")]
     Streamer(#[from] StreamerError),
@@ -39,7 +39,7 @@ pub struct SigVerifyStage {
 }
 
 pub trait SigVerifier {
-    fn verify_batch(&self, batch: Vec<Packets>) -> Vec<Packets>;
+    fn verify_batch(&self, batch: Vec<StandardPackets>) -> Vec<StandardPackets>;
 }
 
 #[derive(Default, Clone)]
@@ -122,7 +122,7 @@ impl SigVerifierStats {
 }
 
 impl SigVerifier for DisabledSigVerifier {
-    fn verify_batch(&self, mut batch: Vec<Packets>) -> Vec<Packets> {
+    fn verify_batch(&self, mut batch: Vec<StandardPackets>) -> Vec<StandardPackets> {
         sigverify::ed25519_verify_disabled(&mut batch);
         batch
     }
@@ -131,15 +131,15 @@ impl SigVerifier for DisabledSigVerifier {
 impl SigVerifyStage {
     #[allow(clippy::new_ret_no_self)]
     pub fn new<T: SigVerifier + 'static + Send + Clone>(
-        packet_receiver: Receiver<Packets>,
-        verified_sender: CrossbeamSender<Vec<Packets>>,
+        packet_receiver: Receiver<StandardPackets>,
+        verified_sender: CrossbeamSender<Vec<StandardPackets>>,
         verifier: T,
     ) -> Self {
         let thread_hdl = Self::verifier_services(packet_receiver, verified_sender, verifier);
         Self { thread_hdl }
     }
 
-    pub fn discard_excess_packets(batches: &mut Vec<Packets>, max_packets: usize) {
+    pub fn discard_excess_packets(batches: &mut Vec<StandardPackets>, max_packets: usize) {
         let mut received_ips = HashMap::new();
         for (batch_index, batch) in batches.iter().enumerate() {
             for (packet_index, packets) in batch.packets.iter().enumerate() {
@@ -169,8 +169,8 @@ impl SigVerifyStage {
     }
 
     fn verifier<T: SigVerifier>(
-        recvr: &PacketReceiver,
-        sendr: &CrossbeamSender<Vec<Packets>>,
+        recvr: &StandardPacketReceiver,
+        sendr: &CrossbeamSender<Vec<StandardPackets>>,
         verifier: &T,
         stats: &mut SigVerifierStats,
     ) -> Result<()> {
@@ -216,8 +216,8 @@ impl SigVerifyStage {
     }
 
     fn verifier_service<T: SigVerifier + 'static + Send + Clone>(
-        packet_receiver: PacketReceiver,
-        verified_sender: CrossbeamSender<Vec<Packets>>,
+        packet_receiver: StandardPacketReceiver,
+        verified_sender: CrossbeamSender<Vec<StandardPackets>>,
         verifier: &T,
     ) -> JoinHandle<()> {
         let verifier = verifier.clone();
@@ -252,8 +252,8 @@ impl SigVerifyStage {
     }
 
     fn verifier_services<T: SigVerifier + 'static + Send + Clone>(
-        packet_receiver: PacketReceiver,
-        verified_sender: CrossbeamSender<Vec<Packets>>,
+        packet_receiver: StandardPacketReceiver,
+        verified_sender: CrossbeamSender<Vec<StandardPackets>>,
         verifier: T,
     ) -> JoinHandle<()> {
         Self::verifier_service(packet_receiver, verified_sender, &verifier)

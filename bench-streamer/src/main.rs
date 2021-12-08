@@ -3,7 +3,7 @@ use {
     clap::{crate_description, crate_name, App, Arg},
     solana_streamer::{
         packet::{Packet, Packets, PacketsRecycler, PACKET_DATA_SIZE},
-        streamer::{receiver, PacketReceiver},
+        streamer::{receiver, StandardPacketReceiver},
     },
     std::{
         cmp::max,
@@ -42,7 +42,8 @@ fn producer(addr: &SocketAddr, exit: Arc<AtomicBool>) -> JoinHandle<()> {
     })
 }
 
-fn sink(exit: Arc<AtomicBool>, rvs: Arc<AtomicUsize>, r: PacketReceiver) -> JoinHandle<()> {
+// TODO: Revisit whether this should be generic
+fn sink(exit: Arc<AtomicBool>, rvs: Arc<AtomicUsize>, r: StandardPacketReceiver) -> JoinHandle<()> {
     spawn(move || loop {
         if exit.load(Ordering::Relaxed) {
             return;

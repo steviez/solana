@@ -11,7 +11,7 @@ use {
     },
     solana_runtime::bank_forks::BankForks,
     solana_sdk::clock::{Slot, DEFAULT_MS_PER_SLOT},
-    solana_streamer::streamer::{self, PacketReceiver, PacketSender},
+    solana_streamer::streamer::{self, StandardPacketReceiver, StandardPacketSender},
     std::{
         net::UdpSocket,
         sync::{atomic::AtomicBool, mpsc::channel, Arc, RwLock},
@@ -63,8 +63,8 @@ impl ShredFetchStage {
 
     // updates packets received on a channel and sends them on another channel
     fn modify_packets<F>(
-        recvr: PacketReceiver,
-        sendr: PacketSender,
+        recvr: StandardPacketReceiver,
+        sendr: StandardPacketSender,
         bank_forks: Option<Arc<RwLock<BankForks>>>,
         name: &'static str,
         modify: F,
@@ -133,7 +133,7 @@ impl ShredFetchStage {
     fn packet_modifier<F>(
         sockets: Vec<Arc<UdpSocket>>,
         exit: &Arc<AtomicBool>,
-        sender: PacketSender,
+        sender: StandardPacketSender,
         recycler: Recycler<PinnedVec<Packet>>,
         bank_forks: Option<Arc<RwLock<BankForks>>>,
         name: &'static str,
@@ -169,7 +169,7 @@ impl ShredFetchStage {
         sockets: Vec<Arc<UdpSocket>>,
         forward_sockets: Vec<Arc<UdpSocket>>,
         repair_socket: Arc<UdpSocket>,
-        sender: &PacketSender,
+        sender: &StandardPacketSender,
         bank_forks: Option<Arc<RwLock<BankForks>>>,
         exit: &Arc<AtomicBool>,
     ) -> Self {
