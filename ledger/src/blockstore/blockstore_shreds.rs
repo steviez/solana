@@ -1,10 +1,14 @@
 //! Blockstore functions specific to the storage of shreds
 //!
-//! TODO: More documentation
+//! TODOs
+//! - More documentation here
+//! - Evaluate dedicated thread pool for flush + delete instead of global
+
 use {
     super::*,
     crate::shred::{ShredType, SHRED_PAYLOAD_SIZE},
     dashmap::DashMap,
+    rayon::iter::{IntoParallelIterator, ParallelIterator},
     serde::{Deserialize, Serialize},
     solana_measure::measure::Measure,
     std::{
@@ -296,13 +300,18 @@ impl Blockstore {
             );
             return Ok(flush_stats);
         }
+        let num_slots_to_flush = slots_to_flush.len();
 
-        flush_stats.num_slots_flushed = slots_to_flush.len();
-        for slot in slots_to_flush.iter() {
-            let (is_merge, num_shreds_flushed) = self.flush_data_shreds_for_slot_to_fs(*slot)?;
-            flush_stats.num_slots_merged += is_merge as usize;
-            flush_stats.num_shreds_flushed += num_shreds_flushed;
-        }
+        let stats: Result<Vec<_>> = slots_to_flush
+            .par_iter()
+            .map(|slot| self.flush_data_shreds_for_slot_to_fs(*slot))
+            .collect();
+
+        stats?.iter().for_each(|(merge, num_shreds)| {
+            flush_stats.num_slots_merged += *merge as usize;
+            flush_stats.num_shreds_flushed += num_shreds;
+        });
+        flush_stats.num_slots_flushed = num_slots_to_flush;
         Ok(flush_stats)
     }
 
@@ -317,13 +326,18 @@ impl Blockstore {
             );
             return Ok(flush_stats);
         }
+        let num_slots_to_flush = slots_to_flush.len();
 
-        flush_stats.num_slots_flushed = slots_to_flush.len();
-        for slot in slots_to_flush.iter() {
-            let (is_merge, num_shreds_flushed) = self.flush_coding_shreds_for_slot_to_fs(*slot)?;
-            flush_stats.num_slots_merged += is_merge as usize;
-            flush_stats.num_shreds_flushed += num_shreds_flushed;
-        }
+        let stats: Result<Vec<_>> = slots_to_flush
+            .par_iter()
+            .map(|slot| self.flush_coding_shreds_for_slot_to_fs(*slot))
+            .collect();
+
+        stats?.iter().for_each(|(merge, num_shreds)| {
+            flush_stats.num_slots_merged += *merge as usize;
+            flush_stats.num_shreds_flushed += num_shreds;
+        });
+        flush_stats.num_slots_flushed = num_slots_to_flush;
         Ok(flush_stats)
     }
 
@@ -529,21 +543,19 @@ impl Blockstore {
     /// Remove the data shreds within [from_slot, to_slot) slots
     pub(crate) fn delete_data_shreds(&self, from_slot: Slot, to_slot: Slot) {
         // Remove from the cache; no issues if the slot had previously been flushed
-        // TODO: do this with a thread pool?
-        for slot in from_slot..to_slot {
+        (from_slot..to_slot).into_par_iter().for_each(|slot| {
             self.data_shred_cache.remove(&slot);
             let _ = fs::remove_file(self.data_shred_slot_path(slot));
-        }
+        });
     }
 
     /// Remove the code shreds within [from_slot, to_slot) slots
     pub(crate) fn delete_code_shreds(&self, from_slot: Slot, to_slot: Slot) {
         // Remove from the cache; no issues if the slot had previously been flushed
-        // TODO: do this with a thread pool?
-        for slot in from_slot..to_slot {
+        (from_slot..to_slot).into_par_iter().for_each(|slot| {
             self.code_shred_cache.remove(&slot);
             let _ = fs::remove_file(self.code_shred_slot_path(slot));
-        }
+        });
     }
 
     /// Recover shreds from WAL and restore into proper blockstore container(s)
