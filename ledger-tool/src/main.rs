@@ -2037,7 +2037,7 @@ fn main() {
                     AccessType::TryPrimaryThenSecondary,
                     wal_recovery_mode,
                 );
-                let (bank_forks, ..) = load_bank_forks(
+                let (bank_forks, leader_schedule_cache, ..) = load_bank_forks(
                     arg_matches,
                     &open_genesis_config_by(&ledger_path, arg_matches),
                     &blockstore,
@@ -2048,12 +2048,207 @@ fn main() {
                     eprintln!("Ledger verification failed: {:?}", err);
                     exit(1);
                 });
+
+                // START OF HACKY HACKERSON
+                use {
+                    crossbeam_channel::unbounded,
+                    solana_core::banking_stage::BankingStage,
+                    solana_gossip::cluster_info::{ClusterInfo, Node},
+                    solana_ledger::leader_schedule_cache::LeaderScheduleCache,
+                    solana_perf::packet::{Packet, PacketBatch},
+                    solana_poh::poh_recorder::PohRecorder,
+                    solana_sdk::poh_config::PohConfig,
+                    solana_sdk::signer::keypair::Keypair,
+                    solana_streamer::socket::SocketAddrSpace,
+                    std::{sync::Mutex, thread, time},
+                };
+
+                let slot_of_interest = 131436226;
+
+                let bank_fork_banks_keys: Vec<_> =
+                    bank_forks.banks().keys().map(|slot| *slot).collect();
+                println!("Bank Fork banks: {:?}", bank_fork_banks_keys);
+
+                let bank_131436225 = &bank_forks[slot_of_interest - 1];
+                let leader = leader_schedule_cache
+                    .slot_leader_at(slot_of_interest, Some(&bank_131436225))
+                    .unwrap();
+                let known_leader: Pubkey =
+                    Pubkey::from_str("1aine15iEqZxYySNwcHtQFt4Sgc75cbEi9wks8YgNCa").unwrap();
+                println!(
+                    "Leader for {}: {:?} {:#?}",
+                    slot_of_interest, leader, known_leader
+                );
+
+                // Create new bank for slot that we'll simulate as leader
+                let mut bank_131436226 =
+                    Bank::new_from_parent(&bank_131436225, &leader, slot_of_interest);
+                bank_131436226.ns_per_slot = std::u128::MAX;
+                let bank_131436226 = Arc::new(bank_131436226);
+
+                // Setup stuff to make a BankingStage
+                let cluster_info = ClusterInfo::new(
+                    Node::new_localhost().info,
+                    Arc::new(Keypair::new()),
+                    SocketAddrSpace::Unspecified,
+                );
+                let cluster_info = Arc::new(cluster_info);
+
+                let blockstore = Arc::new(blockstore);
+                let leader_schedule_cache = Arc::new(leader_schedule_cache);
+
+                // let genesis_config = open_genesis_config_by(&ledger_path, arg_matches);
+                // let poh_config = Arc::new(genesis_config.poh_config.clone());
+                let id = Pubkey::default();
+                let poh_config = Arc::new(PohConfig::default());
+                let (mut poh_recorder, _entry_receiver, record_receiver) = PohRecorder::new(
+                    bank_131436226.tick_height(),
+                    bank_131436226.last_blockhash(),
+                    bank_131436226.clone(),
+                    Some((4, 4)),
+                    /*
+                    leader_schedule_cache.next_leader_slot(
+                        &leader,
+                        bank_131436226.slot(),
+                        &bank_131436226,
+                        Some(&banking_blockstore),
+                        GRACE_TICKS_FACTOR * MAX_GRACE_SLOTS,
+                    ),
+                    */
+                    bank_131436226.ticks_per_slot(),
+                    &known_leader,
+                    &blockstore.clone(),
+                    &leader_schedule_cache,
+                    &poh_config,
+                    exit_signal.clone(),
+                );
+                poh_recorder.set_bank(&bank_131436226);
+                let poh_recorder = Arc::new(Mutex::new(poh_recorder));
+
+                let (verified_sender, verified_receiver) = unbounded();
+                let (gossip_verified_vote_sender, gossip_verified_vote_receiver) = unbounded();
+                let (tpu_vote_sender, tpu_vote_receiver) = unbounded();
+                let (gossip_vote_sender, _gossip_vote_receiver) = unbounded();
+
+                let banking_stage = BankingStage::new(
+                    &cluster_info,
+                    &poh_recorder,
+                    verified_receiver,
+                    tpu_vote_receiver,
+                    gossip_verified_vote_receiver,
+                    None,
+                    gossip_vote_sender,
+                    Arc::new(RwLock::new(CostModel::default())),
+                );
+
+                // Emulate the acknowledgement of records that is typically done by PohService
+                let exit_signal_record_handler = exit_signal.clone();
+                let poh_recorder_record_handler = poh_recorder.clone();
+                let poh_record_receiver = thread::spawn(move || loop {
+                    if let Ok(mut record) = record_receiver.try_recv() {
+                        let mut poh_recorder_l = poh_recorder_record_handler.lock().unwrap();
+
+                        let res = poh_recorder_l.record(
+                            record.slot,
+                            record.mixin,
+                            std::mem::take(&mut record.transactions),
+                        );
+
+                        let _send_res = record.sender.send(res);
+                    } else {
+                        thread::sleep(time::Duration::from_millis(10));
+                    }
+
+                    if exit_signal_record_handler.load(Ordering::Relaxed) {
+                        break;
+                    }
+                });
+
+                // Parse out all the TX's from this block, and send over to BankingStage
+                let (slot_131436226_entries, _num_shreds, slot_full) = blockstore
+                    .get_slot_entries_with_shred_info(slot_of_interest, 0, false)
+                    .unwrap();
+                assert!(slot_full);
+
+                let mut num_txs = 0;
+                let packet_batches: Vec<_> = slot_131436226_entries
+                    .iter()
+                    .filter_map(|entry| {
+                        if entry.is_tick() {
+                            return None;
+                        }
+                        num_txs += entry.transactions.len();
+                        let mut packet_batch = PacketBatch::with_capacity(entry.transactions.len());
+                        packet_batch
+                            .packets
+                            .resize(entry.transactions.len(), Packet::default());
+                        for (ix, tx) in entry.transactions.iter().enumerate() {
+                            Packet::populate_packet(&mut packet_batch.packets[ix], None, &tx)
+                                .unwrap();
+                        }
+                        Some(packet_batch)
+                    })
+                    .collect();
+                println!("Found {} transactions to send over", num_txs);
+                verified_sender.send(packet_batches).unwrap();
+
+                // Known value from logs
+                let expected_signature_count = 1543;
+                let mut last_signature_count = bank_131436226.signature_count();
+
+                // Wait for bank to complete all the signatures
+                let now = time::Instant::now();
+                while last_signature_count < expected_signature_count
+                    && now.elapsed().as_secs() < 10
+                {
+                    println!(
+                        "Current signature count is {} out of {}",
+                        last_signature_count, expected_signature_count
+                    );
+                    last_signature_count = bank_131436226.signature_count();
+                    thread::sleep(time::Duration::from_millis(500));
+                }
+
+                // Advance tick count to complete banks, but last tick must be known value so blockhash matches
+                println!(
+                    "Advancing tick height {} ticks from {} to {}",
+                    bank_131436226.max_tick_height() - bank_131436226.tick_height(),
+                    bank_131436226.tick_height(),
+                    bank_131436226.max_tick_height()
+                );
+
+                while bank_131436226.tick_height() < bank_131436226.max_tick_height() - 1 {
+                    bank_131436226.register_tick(&Hash::new_unique());
+                }
+
+                // Known value from logs
+                let blockhash_131436226 =
+                    Hash::from_str("FJ2MsXEBtg9kzcqbh3Gohs19YRftmSsK6Toq2dMsuGK1").unwrap();
+                bank_131436226.register_tick(&blockhash_131436226);
+                println!("Recording final blockhash as: {:?}", blockhash_131436226);
+                println!("Tick height advanced to {}", bank_131436226.tick_height());
+
+                bank_131436226.freeze();
+                println!(
+                    "Calculated hash for slot {}: {}",
+                    slot_of_interest,
+                    bank_131436226.hash()
+                );
+
                 if print_accounts_stats {
                     let working_bank = bank_forks.working_bank();
                     working_bank.print_accounts_stats();
                 }
+
+                // Drop sender so banking threads exit
+                drop(verified_sender);
+                drop(gossip_verified_vote_sender);
+                drop(tpu_vote_sender);
                 exit_signal.store(true, Ordering::Relaxed);
                 system_monitor_service.join().unwrap();
+                banking_stage.join().unwrap();
+                poh_record_receiver.join().unwrap();
+
                 println!("Ok");
             }
             ("graph", Some(arg_matches)) => {
