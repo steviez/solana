@@ -2212,7 +2212,11 @@ fn main() {
                         })
                         .collect();
                     println!("Found {} transactions to send over", num_txs);
-                    verified_sender.send(packet_batches).unwrap();
+                    // Sending batch by batch to allow parallelism in BankingStage; send
+                    // packet_batches over in one go to process serially
+                    for packet_batch in packet_batches.into_iter() {
+                        verified_sender.send(vec![packet_batch]).unwrap();
+                    }
 
                     let mut last_signature_count = replay_bank.signature_count();
                     // Wait for bank to complete all the signatures
