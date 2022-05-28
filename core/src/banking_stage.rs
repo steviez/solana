@@ -137,7 +137,7 @@ pub struct ExecuteAndCommitTransactionsOutput {
 #[derive(Debug, Default)]
 pub struct BankingStageStats {
     last_report: AtomicInterval,
-    id: u32,
+    id: String,
     receive_and_buffer_packets_count: AtomicUsize,
     dropped_packets_count: AtomicUsize,
     pub(crate) dropped_duplicated_packets_count: AtomicUsize,
@@ -160,7 +160,7 @@ pub struct BankingStageStats {
 }
 
 impl BankingStageStats {
-    pub fn new(id: u32) -> Self {
+    pub fn new(id: String) -> Self {
         BankingStageStats {
             id,
             batch_packet_indexes_len: Histogram::configure()
@@ -212,7 +212,7 @@ impl BankingStageStats {
         if self.last_report.should_update(report_interval_ms) {
             datapoint_info!(
                 "banking_stage-loop-stats",
-                ("id", self.id as i64, i64),
+                "id" => &self.id,
                 (
                     "receive_and_buffer_packets_count",
                     self.receive_and_buffer_packets_count
@@ -429,17 +429,26 @@ impl BankingStage {
         // Many banks that process transactions in parallel.
         let bank_thread_hdls: Vec<JoinHandle<()>> = (0..num_threads)
             .map(|i| {
-                let (verified_receiver, forward_option) = match i {
+                let (verified_receiver, forward_option, id) = match i {
                     0 => {
                         // Disable forwarding of vote transactions
                         // from gossip. Note - votes can also arrive from tpu
-                        (verified_vote_receiver.clone(), ForwardOption::NotForward)
+                        (
+                            verified_vote_receiver.clone(),
+                            ForwardOption::NotForward,
+                            "vote_gossip".to_string(),
+                        )
                     }
                     1 => (
                         tpu_verified_vote_receiver.clone(),
                         ForwardOption::ForwardTpuVote,
+                        "vote_tpu".to_string(),
                     ),
-                    _ => (verified_receiver.clone(), ForwardOption::ForwardTransaction),
+                    _ => (
+                        verified_receiver.clone(),
+                        ForwardOption::ForwardTransaction,
+                        format!("tx_{}", i - 2),
+                    ),
                 };
 
                 let poh_recorder = poh_recorder.clone();
@@ -458,7 +467,7 @@ impl BankingStage {
                             &cluster_info,
                             &mut recv_start,
                             forward_option,
-                            i,
+                            id,
                             batch_limit,
                             transaction_status_sender,
                             gossip_vote_sender,
@@ -1000,7 +1009,7 @@ impl BankingStage {
         cluster_info: &ClusterInfo,
         recv_start: &mut Instant,
         forward_option: ForwardOption,
-        id: u32,
+        id: String,
         batch_limit: usize,
         transaction_status_sender: Option<TransactionStatusSender>,
         gossip_vote_sender: ReplayVoteSender,
@@ -1009,10 +1018,10 @@ impl BankingStage {
     ) {
         let recorder = poh_recorder.lock().unwrap().recorder();
         let mut buffered_packet_batches = UnprocessedPacketBatches::with_capacity(batch_limit);
-        let mut banking_stage_stats = BankingStageStats::new(id);
-        let qos_service = QosService::new(cost_model, id);
+        let mut banking_stage_stats = BankingStageStats::new(id.clone());
+        let qos_service = QosService::new(cost_model, id.clone());
 
-        let mut slot_metrics_tracker = LeaderSlotMetricsTracker::new(id);
+        let mut slot_metrics_tracker = LeaderSlotMetricsTracker::new(id.clone());
         let mut last_metrics_update = Instant::now();
 
         loop {
@@ -1078,7 +1087,7 @@ impl BankingStage {
                         verified_receiver,
                         recv_start,
                         recv_timeout,
-                        id,
+                        &id,
                         &mut buffered_packet_batches,
                         &mut banking_stage_stats,
                         &mut slot_metrics_tracker,
@@ -2042,7 +2051,7 @@ impl BankingStage {
         verified_receiver: &BankingPacketReceiver,
         recv_start: &mut Instant,
         recv_timeout: Duration,
-        id: u32,
+        id: &str,
         buffered_packet_batches: &mut UnprocessedPacketBatches,
         banking_stage_stats: &mut BankingStageStats,
         slot_metrics_tracker: &mut LeaderSlotMetricsTracker,
@@ -2916,7 +2925,10 @@ mod tests {
                 0,
                 None,
                 &gossip_vote_sender,
-                &QosService::new(Arc::new(RwLock::new(CostModel::default())), 1),
+                &QosService::new(
+                    Arc::new(RwLock::new(CostModel::default())),
+                    String::from("1"),
+                ),
             );
 
             let ExecuteAndCommitTransactionsOutput {
@@ -2968,7 +2980,10 @@ mod tests {
                 0,
                 None,
                 &gossip_vote_sender,
-                &QosService::new(Arc::new(RwLock::new(CostModel::default())), 1),
+                &QosService::new(
+                    Arc::new(RwLock::new(CostModel::default())),
+                    String::from("1"),
+                ),
             );
 
             let ExecuteAndCommitTransactionsOutput {
@@ -2997,6 +3012,90 @@ mod tests {
             let _ = poh_simulator.join();
 
             assert_eq!(bank.get_balance(&pubkey), 1);
+        }
+        Blockstore::destroy(ledger_path.path()).unwrap();
+    }
+
+    #[test]
+    fn test_bank_process_and_record_transactions_all_unexecuted() {
+        solana_logger::setup();
+        let GenesisConfigInfo {
+            genesis_config,
+            mint_keypair,
+            ..
+        } = create_slow_genesis_config(10_000);
+        let bank = Arc::new(Bank::new_no_wallclock_throttle_for_tests(&genesis_config));
+        let pubkey = solana_sdk::pubkey::new_rand();
+
+        let transactions = {
+            let mut tx =
+                system_transaction::transfer(&mint_keypair, &pubkey, 1, genesis_config.hash());
+            // Add duplicate account key
+            tx.message.account_keys.push(pubkey);
+            sanitize_transactions(vec![tx])
+        };
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        {
+            let blockstore = Blockstore::open(ledger_path.path())
+                .expect("Expected to be able to open database ledger");
+            let (poh_recorder, _entry_receiver, record_receiver) = PohRecorder::new(
+                bank.tick_height(),
+                bank.last_blockhash(),
+                bank.clone(),
+                Some((4, 4)),
+                bank.ticks_per_slot(),
+                &pubkey,
+                &Arc::new(blockstore),
+                &Arc::new(LeaderScheduleCache::new_from_bank(&bank)),
+                &Arc::new(PohConfig::default()),
+                Arc::new(AtomicBool::default()),
+            );
+            let recorder = poh_recorder.recorder();
+            let poh_recorder = Arc::new(Mutex::new(poh_recorder));
+
+            let poh_simulator = simulate_poh(record_receiver, &poh_recorder);
+
+            poh_recorder.lock().unwrap().set_bank(&bank);
+            let (gossip_vote_sender, _gossip_vote_receiver) = unbounded();
+
+            let process_transactions_batch_output = BankingStage::process_and_record_transactions(
+                &bank,
+                &transactions,
+                &recorder,
+                0,
+                None,
+                &gossip_vote_sender,
+                &QosService::new(
+                    Arc::new(RwLock::new(CostModel::default())),
+                    String::from("1"),
+                ),
+            );
+
+            let ExecuteAndCommitTransactionsOutput {
+                transactions_attempted_execution_count,
+                executed_transactions_count,
+                executed_with_successful_result_count,
+                commit_transactions_result,
+                retryable_transaction_indexes,
+                ..
+            } = process_transactions_batch_output.execute_and_commit_transactions_output;
+
+            assert_eq!(transactions_attempted_execution_count, 1);
+            assert_eq!(executed_transactions_count, 0);
+            assert_eq!(executed_with_successful_result_count, 0);
+            assert!(retryable_transaction_indexes.is_empty());
+            assert_eq!(
+                commit_transactions_result.ok(),
+                Some(vec![CommitTransactionDetails::NotCommitted; 1])
+            );
+
+            poh_recorder
+                .lock()
+                .unwrap()
+                .is_exited
+                .store(true, Ordering::Relaxed);
+            let _ = poh_simulator.join();
         }
         Blockstore::destroy(ledger_path.path()).unwrap();
     }
@@ -3036,7 +3135,10 @@ mod tests {
             poh_recorder.lock().unwrap().set_bank(&bank);
             let (gossip_vote_sender, _gossip_vote_receiver) = unbounded();
 
-            let qos_service = QosService::new(Arc::new(RwLock::new(CostModel::default())), 1);
+            let qos_service = QosService::new(
+                Arc::new(RwLock::new(CostModel::default())),
+                String::from("1"),
+            );
 
             let get_block_cost = || bank.read_cost_tracker().unwrap().block_cost();
             let get_tx_count = || bank.read_cost_tracker().unwrap().transaction_count();
@@ -3196,7 +3298,10 @@ mod tests {
                 0,
                 None,
                 &gossip_vote_sender,
-                &QosService::new(Arc::new(RwLock::new(CostModel::default())), 1),
+                &QosService::new(
+                    Arc::new(RwLock::new(CostModel::default())),
+                    String::from("1"),
+                ),
             );
 
             poh_recorder
@@ -3308,7 +3413,10 @@ mod tests {
                 &recorder,
                 None,
                 &gossip_vote_sender,
-                &QosService::new(Arc::new(RwLock::new(CostModel::default())), 1),
+                &QosService::new(
+                    Arc::new(RwLock::new(CostModel::default())),
+                    String::from("1"),
+                ),
             );
 
             let ProcessTransactionsSummary {
@@ -3374,7 +3482,10 @@ mod tests {
             &recorder,
             None,
             &gossip_vote_sender,
-            &QosService::new(Arc::new(RwLock::new(CostModel::default())), 1),
+            &QosService::new(
+                Arc::new(RwLock::new(CostModel::default())),
+                String::from("1"),
+            ),
         );
 
         poh_recorder
@@ -3596,7 +3707,10 @@ mod tests {
                     sender: transaction_status_sender,
                 }),
                 &gossip_vote_sender,
-                &QosService::new(Arc::new(RwLock::new(CostModel::default())), 1),
+                &QosService::new(
+                    Arc::new(RwLock::new(CostModel::default())),
+                    String::from("1"),
+                ),
             );
 
             transaction_status_service.join().unwrap();
@@ -3757,7 +3871,10 @@ mod tests {
                     sender: transaction_status_sender,
                 }),
                 &gossip_vote_sender,
-                &QosService::new(Arc::new(RwLock::new(CostModel::default())), 1),
+                &QosService::new(
+                    Arc::new(RwLock::new(CostModel::default())),
+                    String::from("1"),
+                ),
             );
 
             transaction_status_service.join().unwrap();
@@ -3877,8 +3994,11 @@ mod tests {
                 None::<Box<dyn Fn()>>,
                 &BankingStageStats::default(),
                 &recorder,
-                &QosService::new(Arc::new(RwLock::new(CostModel::default())), 1),
-                &mut LeaderSlotMetricsTracker::new(0),
+                &QosService::new(
+                    Arc::new(RwLock::new(CostModel::default())),
+                    String::from("1"),
+                ),
+                &mut LeaderSlotMetricsTracker::new(String::from("0")),
                 num_conflicting_transactions,
             );
             assert_eq!(buffered_packet_batches.len(), num_conflicting_transactions);
@@ -3897,8 +4017,11 @@ mod tests {
                     None::<Box<dyn Fn()>>,
                     &BankingStageStats::default(),
                     &recorder,
-                    &QosService::new(Arc::new(RwLock::new(CostModel::default())), 1),
-                    &mut LeaderSlotMetricsTracker::new(0),
+                    &QosService::new(
+                        Arc::new(RwLock::new(CostModel::default())),
+                        String::from("1"),
+                    ),
+                    &mut LeaderSlotMetricsTracker::new(String::from("0")),
                     num_packets_to_process_per_iteration,
                 );
                 if num_expected_unprocessed == 0 {
@@ -3970,8 +4093,11 @@ mod tests {
                         test_fn,
                         &BankingStageStats::default(),
                         &recorder,
-                        &QosService::new(Arc::new(RwLock::new(CostModel::default())), 1),
-                        &mut LeaderSlotMetricsTracker::new(0),
+                        &QosService::new(
+                            Arc::new(RwLock::new(CostModel::default())),
+                            String::from("1"),
+                        ),
+                        &mut LeaderSlotMetricsTracker::new(String::from("0")),
                         num_packets_to_process_per_iteration,
                     );
 
@@ -4069,7 +4195,7 @@ mod tests {
                     &poh_recorder,
                     true,
                     &data_budget,
-                    &mut LeaderSlotMetricsTracker::new(0),
+                    &mut LeaderSlotMetricsTracker::new(String::from("0")),
                 );
 
                 recv_socket
@@ -4176,7 +4302,7 @@ mod tests {
                     &poh_recorder,
                     hold,
                     &DataBudget::default(),
-                    &mut LeaderSlotMetricsTracker::new(0),
+                    &mut LeaderSlotMetricsTracker::new(String::from("0")),
                 );
 
                 recv_socket
