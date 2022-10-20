@@ -2223,6 +2223,17 @@ fn main() {
                            If no file name is specified, it will print the metadata of all ledger files.")
             )
         )
+        .subcommand(
+            SubCommand::with_name("steviez")
+            .about("Parse log file to get slot # as the x-axis")
+            .arg(
+                Arg::with_name("log_path")
+                    .long("log-path")
+                    .value_name("PATH")
+                    .takes_value(true)
+                    .help("path to log file to parse"),
+            )
+        )
         .get_matches();
 
     info!("{} {}", crate_name!(), solana_version::version!());
@@ -2598,6 +2609,188 @@ fn main() {
                         }
                     }
                 }
+            }
+            ("steviez", Some(arg_matches)) => {
+                // TOOO: this could be generalized for non-datapoint lines too
+                // TODO: this could be sped up by multi-threading, one thread to do I/O
+                //       and shove strings into a channel with multiple worker threads
+                //       doing the regex matching
+                let log_line_regex = Regex::new(
+                    r"(?x)
+                    \[
+                    (?P<timestamp>[^\s]+)
+                    \s
+                    (?P<level>[A-Z]+)
+                    \s\s
+                    (?P<component>[a-z:_]+)
+                    \]\sdatapoint:\s
+                    (?P<datapoint>.*)
+                ",
+                )
+                .unwrap();
+                let datapoints_to_match = vec![
+                    "bank-new_from_parent-heights",
+                    "shred_insert_is_full",
+                    "bank_frozen",
+                ];
+
+                // map Slot to (first_shred, new_bank, last_shred, bank_frozen) timestamps
+                let mut all_data: BTreeMap<
+                    Slot,
+                    (DateTime<Utc>, DateTime<Utc>, DateTime<Utc>, DateTime<Utc>),
+                > = BTreeMap::new();
+
+                // For testing / debugging
+                /*
+                let test_log_lines = vec![
+                    "[2022-10-19T00:00:12.422316353Z INFO  solana_core::replay_stage] new fork:156095128 parent:156095127 root:156095009",
+                    "[2022-10-19T00:00:12.423708834Z INFO  solana_metrics::metrics] datapoint: bank-new_from_parent-heights slot=156095128i block_height=141055085i parent_slot=156095127i bank_rc_creation_us=4i total_elapsed_us=1354i status_cache_us=0i fee_components_us=1i blockhash_queue_us=8i stakes_cache_us=1i epoch_stakes_time_us=1i builtin_programs_us=0i rewards_pool_pubkeys_us=0i cached_executors_us=25i transaction_debug_keys_us=0i transaction_log_collector_config_us=0i feature_set_us=0i ancestors_us=24i update_epoch_us=0i update_sysvars_us=1105i fill_sysvar_cache_us=171i",
+                    "[2022-10-19T00:00:12.747010341Z INFO  solana_metrics::metrics] datapoint: shred_insert_is_full total_time_ms=362i slot=156095128i last_index=908i num_repaired=0i num_recovered=376i",
+                    "[2022-10-19T00:00:12.757673618Z INFO  solana_metrics::metrics] datapoint: bank_frozen slot=156095128i hash=\"Fq53jbAgbHgJ3v4cHgeQfjnBJ3RzZ56kfKjkNvvXEq3B\""
+                ];
+                */
+
+                // Comment out below if running with debug output
+                let log_file = PathBuf::from(value_t_or_exit!(arg_matches, "log_path", String));
+                let log_file = File::open(&log_file).unwrap();
+                let reader = BufReader::new(log_file);
+
+                //for log_line in test_log_lines {
+                for log_line in reader.lines() {
+                    let log_line = log_line.unwrap();
+                    // Our regex will match all datapoints so if captures
+                    // is None, this was not a datapoint and just move on.
+                    let captures = log_line_regex.captures(&log_line);
+                    if captures.is_none() {
+                        continue;
+                    }
+                    let captures = captures.unwrap();
+
+                    let timestamp = captures.name("timestamp").map(|m| m.as_str()).unwrap();
+                    let timestamp = timestamp.parse::<DateTime<Utc>>().unwrap();
+                    let level = captures.name("level").map(|m| m.as_str()).unwrap();
+                    let component = captures.name("component").map(|m| m.as_str()).unwrap();
+                    let datapoint = captures.name("datapoint").map(|m| m.as_str()).unwrap();
+
+                    debug!("timestamp: {}.", timestamp);
+                    debug!("level: {}.", level);
+                    debug!("component: {}.", component);
+                    debug!("datapoint: {}.", datapoint);
+
+                    // The datapoint identifier and fields are all space separated
+                    let datapoint_fields: Vec<_> = datapoint.split(' ').collect();
+                    // Datapoints should have at least a name and one field, so two elements
+                    assert!(datapoint_fields.len() > 1);
+                    // The first element is the datapoint name
+                    let datapoint_name = datapoint_fields[0];
+                    // Check to make sure we care about this point before doing more processing
+                    // TODO: could move this check prior to parsing stuff like timestamp
+                    if !datapoints_to_match.contains(&datapoint_name) {
+                        continue;
+                    }
+
+                    // Parse the fields we care about out
+                    let mut slot = 0;
+                    let mut total_time_ms = 0;
+                    for datapoint_field in datapoint_fields.iter().skip(1) {
+                        // Datapoint fields are of the form key=value
+                        let key_and_value: Vec<_> = datapoint_field.split('=').collect();
+                        assert!(key_and_value.len() == 2);
+                        let key = key_and_value[0];
+                        let value = key_and_value[1];
+                        // Strip the trailing 'i' that is appended to any i64 fields
+                        match key {
+                            "slot" => {
+                                slot = value[0..value.len() - 1].parse::<Slot>().unwrap();
+                            }
+                            "total_time_ms" => {
+                                total_time_ms = value[0..value.len() - 1].parse::<i64>().unwrap();
+                            }
+                            &_ => {
+                                // Don't care about any other fields at the moment
+                            }
+                        }
+                    }
+                    assert_ne!(slot, 0);
+                    assert!(total_time_ms != 0 || datapoint_name != "shred_insert_is_full");
+
+                    match datapoint_name {
+                        "bank-new_from_parent-heights" => {
+                            assert!(all_data.get(&slot).is_none());
+                            all_data.insert(
+                                slot,
+                                (
+                                    DateTime::<Utc>::default(),
+                                    timestamp,
+                                    DateTime::<Utc>::default(),
+                                    DateTime::<Utc>::default(),
+                                ),
+                            );
+                        }
+                        "shred_insert_is_full" => {
+                            // Drop this datapoint if the entry doesn't exist for this slot yet
+                            if let Some(entry) = all_data.get_mut(&slot) {
+                                entry.0 = timestamp - chrono::Duration::milliseconds(total_time_ms);
+                                entry.2 = timestamp;
+                            }
+                        }
+                        "bank_frozen" => {
+                            // Drop this datapoint if the entry doesn't exist for this slot yet
+                            if let Some(entry) = all_data.get_mut(&slot) {
+                                entry.3 = timestamp;
+                            }
+                        }
+                        &_ => {}
+                    }
+                }
+                debug!("all_data: {:#?}", all_data);
+
+                // Convert all numbers to offsets relative to first received shred
+                // Comma separate the values into strings
+                let all_data_offsets: Vec<String> = all_data
+                    .iter()
+                    .filter_map(|(slot, (first_shred, new_bank, slot_full, bank_frozen))| {
+                        if *bank_frozen != DateTime::<Utc>::default() {
+                            Some(format!(
+                                "{},{},{},{}",
+                                slot,
+                                (*new_bank - *first_shred).num_milliseconds(),
+                                (*slot_full - *first_shred).num_milliseconds(),
+                                (*bank_frozen - *first_shred).num_milliseconds()
+                            ))
+                        } else {
+                            // Remove all of the slots that didn't freeze (ie dead slots)
+                            None
+                        }
+
+                        /*(
+
+                            slot,
+                            (
+                                0,
+                                (entry.1 - entry.0).num_milliseconds(),
+                                (entry.2 - entry.0).num_milliseconds(),
+                                (entry.3 - entry.0).num_milliseconds(),
+                            ),
+                        )*/
+                    })
+                    .collect();
+
+                let header_line = String::from("slot,new_bank,last_shred,bank_frozen\n");
+
+                // Now, dump all the strings
+                /*
+                info!(
+                    "{:#?}",
+                    header_line.clone() + &all_data_offsets.join("\n") + "\n"
+                );
+                */
+                let output_file = ledger_path.join("timing.csv");
+                std::fs::write(
+                    output_file,
+                    header_line + &all_data_offsets.join("\n") + "\n",
+                )
+                .unwrap();
             }
             ("parse_full_frozen", Some(arg_matches)) => {
                 let starting_slot = value_t_or_exit!(arg_matches, "starting_slot", Slot);
