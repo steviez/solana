@@ -27,6 +27,7 @@ use {
     crossbeam_channel::{bounded, Receiver, Sender, TrySendError},
     dashmap::DashSet,
     log::*,
+    lru::LruCache,
     rayon::{
         iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
         ThreadPool,
@@ -147,6 +148,31 @@ pub struct BlockstoreSignals {
     pub completed_slots_receiver: CompletedSlotsReceiver,
 }
 
+#[derive(Default)]
+struct ShredSourceSlotEntry {
+    // Source of shred that resulted in first insertion
+    map: HashMap<u64 /* shred index*/, ShredSource>,
+    // Number of data shreds first inserted via turbine
+    tur: usize,
+    // Number of data shreds first inserted via recovery
+    rec: usize,
+    // Number of data shreds first inserted via repair
+    rep: usize,
+    // Below fields represent duplicates where the
+    // first half of variable name indicates first
+    // insertion source and the second half denotes
+    // source for subsequent (duplicate) insertion(s)
+    tur_tur: usize,
+    tur_rec: usize,
+    tur_rep: usize,
+    rec_tur: usize,
+    rec_rec: usize,
+    rec_rep: usize,
+    rep_tur: usize,
+    rep_rec: usize,
+    rep_rep: usize,
+}
+
 // ledger window
 pub struct Blockstore {
     ledger_path: PathBuf,
@@ -178,6 +204,7 @@ pub struct Blockstore {
     pub shred_timing_point_sender: Option<PohTimingSender>,
     pub lowest_cleanup_slot: RwLock<Slot>,
     pub slots_stats: SlotsStats,
+    shred_source_map: Mutex<LruCache<Slot, ShredSourceSlotEntry>>,
 }
 
 pub struct IndexMetaWorkingSetEntry {
@@ -335,6 +362,7 @@ impl Blockstore {
             last_root,
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             slots_stats: SlotsStats::default(),
+            shred_source_map: Mutex::new(LruCache::new(1024)),
         };
         if initialize_transaction_status_index {
             blockstore.initialize_transaction_status_index()?;
@@ -1282,6 +1310,68 @@ impl Blockstore {
     {
         let slot = shred.slot();
         let shred_index = u64::from(shred.index());
+
+        // Tracking to see where duplicate shreds coming from
+        {
+            let mut shred_source_map = self.shred_source_map.lock().unwrap();
+
+            // Check if this slot would push us over capacity - if so, drop the item
+            // manually so we can push the data for that slot
+            if shred_source_map.cap() == shred_source_map.len() && !shred_source_map.contains(&slot) {
+                let (s, e) = shred_source_map.pop_lru().unwrap();
+                info!(
+                    "shred_duplicate_info: {},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                    s,
+                    e.map.len(),
+                    e.tur,
+                    e.rec,
+                    e.rep,
+                    e.tur_tur,
+                    e.tur_rec,
+                    e.tur_rep,
+                    e.rec_tur,
+                    e.rec_rec,
+                    e.rec_rep,
+                    e.rep_tur,
+                    e.rep_rec,
+                    e.rep_rep,
+                );
+                // We were full and should have dropped by 1
+                assert!(shred_source_map.len() < shred_source_map.cap());
+            }
+
+            // Do get_or_insert() first to ensure in the map, then get_mut()
+            let _ = shred_source_map.get_or_insert(slot, || ShredSourceSlotEntry::default());
+            let slot_entry = shred_source_map.get_mut(&slot).unwrap();
+
+            // If there is a duplicate, map
+            if let Some(existing_source) = slot_entry.map.get(&shred_index) {
+                match existing_source {
+                    ShredSource::Turbine => match shred_source {
+                        ShredSource::Turbine => slot_entry.tur_tur += 1,
+                        ShredSource::Recovered => slot_entry.tur_rec += 1,
+                        ShredSource::Repaired => slot_entry.tur_rep += 1,
+                    },
+                    ShredSource::Recovered => match shred_source {
+                        ShredSource::Turbine => slot_entry.rec_tur += 1,
+                        ShredSource::Recovered => slot_entry.rec_rec += 1,
+                        ShredSource::Repaired => slot_entry.rec_rep += 1,
+                    },
+                    ShredSource::Repaired => match shred_source {
+                        ShredSource::Turbine => slot_entry.rep_tur += 1,
+                        ShredSource::Recovered => slot_entry.rep_rec += 1,
+                        ShredSource::Repaired => slot_entry.rep_rep += 1,
+                    },
+                }
+            } else {
+                slot_entry.map.insert(shred_index, shred_source);
+                match shred_source {
+                    ShredSource::Turbine => slot_entry.tur += 1,
+                    ShredSource::Recovered => slot_entry.rec += 1,
+                    ShredSource::Repaired => slot_entry.rep += 1,
+                }
+            }
+        }
 
         let index_meta_working_set_entry =
             get_index_meta_entry(&self.db, slot, index_working_set, index_meta_time_us);
