@@ -36,6 +36,7 @@ members = [
     "ledger-tool",
     "local-cluster",
     "log-analyzer",
+    "log-parser",
     "logger",
     "measure",
     "memory-management",

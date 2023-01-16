@@ -5731,6 +5731,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-log-parser"
+version = "1.15.0"
+dependencies = [
+ "bs58",
+ "chrono",
+ "clap 2.33.3",
+ "log",
+ "regex",
+ "serde",
+ "serde_json",
+ "solana-logger 1.15.0",
+ "solana-version",
+ "tikv-jemallocator",
+]
+
+[[package]]
 name = "solana-logger"
 version = "1.14.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
