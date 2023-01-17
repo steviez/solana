@@ -17,10 +17,12 @@ use {
     solana_measure::measure::Measure,
     solana_perf::{
         deduper::Deduper,
+        discard::count_packets_in_batches,
         packet::{Packet, PacketBatch},
         sigverify::{
-            count_discarded_packets, count_packets_in_batches, count_valid_packets, shrink_batches,
+            count_discarded_packets, count_valid_packets, shrink_batches,
         },
+        tx_packet_batch::{TxPacketBatch, TxPacketViewMut},
     },
     solana_sdk::timing,
     solana_streamer::streamer::{self, StreamerError},
@@ -214,9 +216,9 @@ impl SigVerifyStage {
     }
 
     pub fn discard_excess_packets(
-        batches: &mut [PacketBatch],
+        batches: &mut Vec<TxPacketBatch>,
         mut max_packets: usize,
-        mut process_excess_packet: impl FnMut(&Packet),
+        mut process_excess_packet: impl FnMut(&TxPacketViewMut),
     ) {
         // Group packets by their incoming IP address.
         let mut addrs = batches
@@ -238,13 +240,13 @@ impl SigVerifyStage {
         }
         // Discard excess packets from each address.
         for packet in addrs.into_values().flatten() {
-            process_excess_packet(packet);
+            process_excess_packet(&packet);
             packet.meta_mut().set_discard(true);
         }
     }
 
     /// make this function public so that it is available for benchmarking
-    pub fn maybe_shrink_batches(packet_batches: &mut Vec<PacketBatch>) -> (u64, usize) {
+    pub fn maybe_shrink_batches(packet_batches: &mut Vec<TxPacketBatch>) -> (u64, usize) {
         let mut shrink_time = Measure::start("sigverify_shrink_time");
         let num_packets = count_packets_in_batches(packet_batches);
         let num_discarded_packets = count_discarded_packets(packet_batches);
@@ -289,7 +291,7 @@ impl SigVerifyStage {
             #[inline(always)]
             |received_packet, removed_before_sigverify_stage, is_dup| {
                 verifier.process_received_packet(
-                    received_packet,
+                    &received_packet,
                     removed_before_sigverify_stage,
                     is_dup,
                 );
