@@ -318,14 +318,14 @@ impl TxPacketBatch {
         packet_index_bound_check!("as_ptr_at_index", packet_index, self.len);
 
         // Cast pointer to u8 first as the calculated offset will be in bytes.
-        let offset_in_bytes = packet_index * self.buffer_len;
+        let offset_in_bytes = packet_index * (self.buffer_len + std::mem::size_of::<Meta>());
         unsafe { self.as_ptr().cast::<u8>().add(offset_in_bytes) }
     }
 
     #[inline]
     /// Returns a mutable pointer to the beginning of the data buffer.
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        unsafe { self.data.as_mut_ptr().cast::<u8>().add(0) }
+        self.data.as_mut_ptr().cast::<u8>()
     }
 
     /// Returns a mutable pointer to the beginning of `packet_index` packet.
@@ -333,7 +333,7 @@ impl TxPacketBatch {
         packet_index_bound_check!("as_mut_ptr_at_index", packet_index, self.len);
 
         // Cast pointer to u8 first as the calculated offset will be in bytes.
-        let offset_in_bytes = packet_index * self.buffer_len;
+        let offset_in_bytes = packet_index * (self.buffer_len + std::mem::size_of::<Meta>());
         unsafe { self.as_mut_ptr().add(offset_in_bytes) }
     }
 
