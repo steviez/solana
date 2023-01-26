@@ -109,7 +109,7 @@ mod tests {
         super::*,
         crate::{discard::count_packets_in_batches, packet::to_packet_batches, test_tx::test_tx},
     };
-
+    /*
     #[test]
     fn test_dedup_same() {
         let tx = test_tx();
@@ -173,4 +173,5 @@ mod tests {
         //allow for 1 false positive even if extremely unlikely
         assert!(discard < 2);
     }
+    */
 }

@@ -8,23 +8,14 @@ pub use solana_perf::sigverify::{
     ed25519_verify_cpu, ed25519_verify_disabled, init, TxOffset,
 };
 use {
-<<<<<<< HEAD
     crate::{
         banking_trace::{BankingPacketBatch, BankingPacketSender},
-        sigverify_stage::{SigVerifier, SigVerifyServiceError},
+        sigverify_stage::{SigVerifyServiceError},
     },
-=======
-    crate::{banking_stage::BankingPacketBatch, sigverify_stage::SigVerifyServiceError},
-    crossbeam_channel::Sender,
-<<<<<<< HEAD
->>>>>>> e59cd309c9 (Rip out SigVerifier trait)
-    solana_perf::{cuda_runtime::PinnedVec, packet::PacketBatch, recycler::Recycler, sigverify},
-=======
     solana_perf::{
         cuda_runtime::PinnedVec, packet::PacketBatch, recycler::Recycler, sigverify,
         tx_packet_batch::TxPacketViewMut,
     },
->>>>>>> 4ba1998ccb (Plumbing TxPacketBatch through Tx packet path)
     solana_sdk::{packet::Packet, saturating_add_assign},
 };
 
@@ -67,11 +58,7 @@ impl SigverifyTracerPacketStats {
 }
 
 pub struct TransactionSigVerifier {
-<<<<<<< HEAD
     packet_sender: BankingPacketSender,
-=======
-    packet_sender: Sender<BankingPacketBatch>,
->>>>>>> e59cd309c9 (Rip out SigVerifier trait)
     tracer_packet_stats: SigverifyTracerPacketStats,
     recycler: Recycler<TxOffset>,
     recycler_out: Recycler<PinnedVec<u8>>,
@@ -79,21 +66,13 @@ pub struct TransactionSigVerifier {
 }
 
 impl TransactionSigVerifier {
-<<<<<<< HEAD
     pub fn new_reject_non_vote(packet_sender: BankingPacketSender) -> Self {
-=======
-    pub fn new_reject_non_vote(packet_sender: Sender<BankingPacketBatch>) -> Self {
->>>>>>> e59cd309c9 (Rip out SigVerifier trait)
         let mut new_self = Self::new(packet_sender);
         new_self.reject_non_vote = true;
         new_self
     }
 
-<<<<<<< HEAD
     pub fn new(packet_sender: BankingPacketSender) -> Self {
-=======
-    pub fn new(packet_sender: Sender<BankingPacketBatch>) -> Self {
->>>>>>> e59cd309c9 (Rip out SigVerifier trait)
         init();
         Self {
             packet_sender,
