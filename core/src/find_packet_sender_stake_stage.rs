@@ -1,7 +1,7 @@
 use {
     crossbeam_channel::{Receiver, RecvTimeoutError, Sender},
     solana_measure::measure::Measure,
-    solana_perf::packet::PacketBatch,
+    solana_perf::packet::{PacketBatch, VarPacketBatch},
     solana_sdk::timing::timestamp,
     solana_streamer::streamer::{self, StakedNodes, StreamerError},
     std::{
@@ -145,7 +145,7 @@ impl FindPacketSenderStakeStage {
         Self { thread_hdl }
     }
 
-    fn apply_sender_stakes(batches: &mut [PacketBatch], ip_to_stake: &HashMap<IpAddr, u64>) {
+    fn apply_sender_stakes(batches: &mut [VarPacketBatch], ip_to_stake: &HashMap<IpAddr, u64>) {
         batches
             .iter_mut()
             .flat_map(|batch| batch.iter_mut())

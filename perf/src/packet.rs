@@ -5,6 +5,9 @@ use {
     bincode::config::Options,
     rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator},
     serde::{de::DeserializeOwned, Deserialize, Serialize},
+    solana_sdk::packet::{
+        GenericPacket, PACKET_DATA_1X_SIZE, PACKET_DATA_2X_SIZE, PACKET_DATA_3X_SIZE,
+    },
     std::{
         io::Read,
         net::SocketAddr,
@@ -18,6 +21,243 @@ pub const NUM_PACKETS: usize = 1024 * 8;
 pub const PACKETS_PER_BATCH: usize = 64;
 pub const NUM_RCVMMSGS: usize = 64;
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct GenericPacketBatch<const N: usize> {
+    packets: PinnedVec<GenericPacket<N>>,
+}
+
+pub type PacketBatchSingle = GenericPacketBatch<PACKET_DATA_1X_SIZE>;
+pub type PacketBatchDouble = GenericPacketBatch<PACKET_DATA_2X_SIZE>;
+pub type PacketBatchTriple = GenericPacketBatch<PACKET_DATA_3X_SIZE>;
+pub type Batch2Recycler<T> = Recycler<PinnedVec<T>>;
+
+pub enum VarPacketBatch {
+    Single(PacketBatchSingle),
+    Double(PacketBatchDouble),
+    Triple(PacketBatchTriple),
+}
+
+macro_rules! var_packet_batch_dispatch {
+    ($vis:vis fn $func_name:ident(&self $(, $arg:ident : $type:ty)*) $(-> $out:ty)?) => {
+        $vis fn $func_name(&self $(, $arg: $ty)*) $(-> $out)? {
+            match self {
+                Self::Single(batch) => batch.$func_name(),
+                Self::Double(batch) => batch.$func_name(),
+                Self::Triple(batch) => batch.$func_name(),
+            }
+        }
+    }
+}
+
+impl VarPacketBatch {
+    var_packet_batch_dispatch!(pub fn len(&self) -> usize);
+    //var_packet_batch_dispatch!(pub fn iter(&self) -> impl Iterator<Item = BatchPacketView> + '_);
+}
+
+impl<const N: usize> GenericPacketBatch<N> {
+    pub fn new(packets: Vec<GenericPacket<N>>) -> Self {
+        let packets = PinnedVec::from_vec(packets);
+        Self { packets }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        let packets = PinnedVec::with_capacity(capacity);
+        Self { packets }
+    }
+
+    pub fn new_pinned_with_capacity(capacity: usize) -> Self {
+        let mut batch = Self::with_capacity(capacity);
+        batch.packets.reserve_and_pin(capacity);
+        batch
+    }
+
+    pub fn new_unpinned_with_recycler(
+        recycler: Batch2Recycler<GenericPacket<N>>,
+        capacity: usize,
+        name: &'static str,
+    ) -> Self {
+        let mut packets = recycler.allocate(name);
+        packets.reserve(capacity);
+        Self { packets }
+    }
+
+    pub fn new_with_recycler(
+        recycler: Batch2Recycler<GenericPacket<N>>,
+        capacity: usize,
+        name: &'static str,
+    ) -> Self {
+        let mut packets = recycler.allocate(name);
+        packets.reserve_and_pin(capacity);
+        Self { packets }
+    }
+
+    pub fn new_with_recycler_data(
+        recycler: &Batch2Recycler<GenericPacket<N>>,
+        name: &'static str,
+        mut packets: Vec<GenericPacket<N>>,
+    ) -> Self {
+        let mut batch = Self::new_with_recycler(recycler.clone(), packets.len(), name);
+        batch.packets.append(&mut packets);
+        batch
+    }
+
+    pub fn new_unpinned_with_recycler_data_and_dests<T: Serialize>(
+        recycler: Batch2Recycler<GenericPacket<N>>,
+        name: &'static str,
+        dests_and_data: &[(SocketAddr, T)],
+    ) -> Self {
+        let mut batch = Self::new_unpinned_with_recycler(recycler, dests_and_data.len(), name);
+        batch
+            .packets
+            .resize(dests_and_data.len(), GenericPacket::default());
+
+        for ((addr, data), packet) in dests_and_data.iter().zip(batch.packets.iter_mut()) {
+            if !addr.ip().is_unspecified() && addr.port() != 0 {
+                if let Err(e) = GenericPacket::populate_packet(packet, Some(addr), &data) {
+                    // TODO: This should never happen. Instead the caller should
+                    // break the payload into smaller messages, and here any errors
+                    // should be propagated.
+                    error!("Couldn't write to packet {:?}. Data skipped.", e);
+                }
+            } else {
+                trace!("Dropping packet, as destination is unknown");
+            }
+        }
+        batch
+    }
+
+    pub fn new_unpinned_with_recycler_data(
+        recycler: &Batch2Recycler<GenericPacket<N>>,
+        name: &'static str,
+        mut packets: Vec<GenericPacket<N>>,
+    ) -> Self {
+        let mut batch = Self::new_unpinned_with_recycler(recycler.clone(), packets.len(), name);
+        batch.packets.append(&mut packets);
+        batch
+    }
+
+    pub fn resize(&mut self, new_len: usize, value: GenericPacket<N>) {
+        self.packets.resize(new_len, value)
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        self.packets.truncate(len);
+    }
+
+    pub fn push(&mut self, packet: GenericPacket<N>) {
+        self.packets.push(packet);
+    }
+
+    pub fn set_addr(&mut self, addr: &SocketAddr) {
+        for p in self.inner_iter_mut() {
+            p.meta_mut().set_socket_addr(addr);
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.packets.len()
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.packets.capacity()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.packets.is_empty()
+    }
+
+    pub fn as_ptr(&self) -> *const GenericPacket<N> {
+        self.packets.as_ptr()
+    }
+
+    /*
+    pub fn iter(&self) -> impl Iterator<Item = BatchPacketView> + '_ {
+        self.inner_iter().map(|packet| BatchPacketView::from(packet))
+    }
+
+    pub fn iter_mut(&self) -> impl Iterator<Item = BatchPacketView> + '_ {
+        self.inner_iter().map(|packet| BatchPacketView::from(packet))
+    }
+    */
+    fn inner_iter(&self) -> Iter<'_, GenericPacket<N>> {
+        self.packets.iter()
+    }
+
+    fn inner_iter_mut(&mut self) -> IterMut<'_, GenericPacket<N>> {
+        self.packets.iter_mut()
+    }
+
+    /// See Vector::set_len() for more details
+    ///
+    /// # Safety
+    ///
+    /// - `new_len` must be less than or equal to [`self.capacity`].
+    /// - The elements at `old_len..new_len` must be initialized. Packet data
+    ///   will likely be overwritten when populating the packet, but the meta
+    ///   should specifically be initialized to known values.
+    pub unsafe fn set_len(&mut self, new_len: usize) {
+        self.packets.set_len(new_len);
+    }
+}
+
+pub struct BatchPacketView<'a> {
+    meta: &'a Meta,
+    buffer: &'a [u8],
+}
+
+impl<'a, const N: usize> From<&'a GenericPacket<N>> for BatchPacketView<'a> {
+    fn from(packet: &'a GenericPacket<N>) -> Self {
+        Self {
+            meta: &packet.meta,
+            buffer: &packet.buffer[..]
+        }
+    }
+}
+
+pub struct BatchPacketViewMut<'a> {
+    meta: &'a mut Meta,
+    buffer: &'a mut [u8],
+}
+
+impl<'a, const N: usize> From<&'a mut GenericPacket<N>> for BatchPacketViewMut<'a> {
+    fn from(packet: &'a mut GenericPacket<N>) -> Self {
+        Self {
+            meta: &mut packet.meta,
+            buffer: &mut packet.buffer[..]
+        }
+    }
+}
+
+impl<const N: usize, I: SliceIndex<[GenericPacket<N>]>> Index<I> for GenericPacketBatch<N> {
+    type Output = I::Output;
+
+    #[inline]
+    fn index(&self, index: I) -> &Self::Output {
+        &self.packets[index]
+    }
+}
+
+impl<const N: usize, I: SliceIndex<[GenericPacket<N>]>> IndexMut<I> for GenericPacketBatch<N> {
+    #[inline]
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        &mut self.packets[index]
+    }
+}
+/*
+impl<'a, const N: usize> IntoIterator for &'a GenericPacketBatch<N> {
+    type Item = BatchPacketView<'a>;
+    type IntoIter = Iter<'a, BatchPacketView<'a>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.packets.iter().map(|p| BatchPacketView {
+            meta: p.meta(),
+            buffer: p.buffer(),
+        })
+    }
+}
+*/
+
+// START_DUPLICATE: Delete the duplicate below once switched over
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PacketBatch {
     packets: PinnedVec<Packet>,
@@ -77,8 +317,7 @@ impl PacketBatch {
         name: &'static str,
         dests_and_data: &[(SocketAddr, T)],
     ) -> Self {
-        let mut batch =
-            Self::new_unpinned_with_recycler(recycler, dests_and_data.len(), name);
+        let mut batch = Self::new_unpinned_with_recycler(recycler, dests_and_data.len(), name);
         batch
             .packets
             .resize(dests_and_data.len(), Packet::default());
@@ -178,6 +417,8 @@ impl<I: SliceIndex<[Packet]>> IndexMut<I> for PacketBatch {
         &mut self.packets[index]
     }
 }
+
+// END_DUPLICATE: Delete the duplicate below once switched over
 
 impl<'a> IntoIterator for &'a PacketBatch {
     type Item = &'a Packet;

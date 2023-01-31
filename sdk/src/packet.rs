@@ -20,6 +20,10 @@ static_assertions::const_assert_eq!(PACKET_DATA_SIZE, 1232);
 ///   8 bytes is the size of the fragment header
 pub const PACKET_DATA_SIZE: usize = 1280 - 40 - 8;
 
+pub const PACKET_DATA_1X_SIZE: usize = PACKET_DATA_SIZE;
+pub const PACKET_DATA_2X_SIZE: usize = 2 * PACKET_DATA_SIZE;
+pub const PACKET_DATA_3X_SIZE: usize = 3 * PACKET_DATA_SIZE;
+
 bitflags! {
     #[repr(C)]
     #[derive(Serialize, Deserialize)]
@@ -67,6 +71,133 @@ pub struct Meta {
 //   https://github.com/serde-rs/serde/pull/1860
 // ryoqun's dirty experiments:
 //   https://github.com/ryoqun/serde-array-comparisons
+#[serde_as]
+#[derive(Clone, Eq, Serialize, Deserialize)]
+#[repr(C)]
+pub struct GenericPacket<const N: usize> {
+    // Bytes past Packet.meta.size are not valid to read from.
+    // Use Packet.data(index) to read from the buffer.
+    #[serde_as(as = "Bytes")]
+    pub buffer: [u8; N],
+    pub meta: Meta,
+}
+
+impl<const N: usize> GenericPacket<N> {
+    pub const BUFFER_LEN: usize = N;
+
+    pub fn new(buffer: [u8; N], meta: Meta) -> Self {
+        Self { buffer, meta }
+    }
+
+    /// Returns an immutable reference to the underlying buffer up to
+    /// packet.meta.size. The rest of the buffer is not valid to read from.
+    /// packet.data(..) returns packet.buffer.get(..packet.meta.size).
+    /// Returns None if the index is invalid or if the packet is already marked
+    /// as discard.
+    #[inline]
+    pub fn data<I>(&self, index: I) -> Option<&<I as SliceIndex<[u8]>>::Output>
+    where
+        I: SliceIndex<[u8]>,
+    {
+        // If the packet is marked as discard, it is either invalid or
+        // otherwise should be ignored, and so the payload should not be read
+        // from.
+        if self.meta.discard() {
+            None
+        } else {
+            self.buffer.get(..self.meta.size)?.get(index)
+        }
+    }
+
+    #[inline]
+    pub fn buffer(&self) -> &[u8] {
+        debug_assert!(!self.meta.discard());
+        &self.buffer[..]
+    }
+
+    /// Returns a mutable reference to the entirety of the underlying buffer to
+    /// write into. The caller is responsible for updating Packet.meta.size
+    /// after writing to the buffer.
+    #[inline]
+    pub fn buffer_mut(&mut self) -> &mut [u8] {
+        debug_assert!(!self.meta.discard());
+        &mut self.buffer[..]
+    }
+
+    #[inline]
+    pub fn meta(&self) -> &Meta {
+        &self.meta
+    }
+
+    #[inline]
+    pub fn meta_mut(&mut self) -> &mut Meta {
+        &mut self.meta
+    }
+
+    pub fn from_data<T: Serialize>(dest: Option<&SocketAddr>, data: T) -> Result<Self> {
+        let mut packet = Self::default();
+        Self::populate_packet(&mut packet, dest, &data)?;
+        Ok(packet)
+    }
+
+    pub fn populate_packet<T: Serialize>(
+        &mut self,
+        dest: Option<&SocketAddr>,
+        data: &T,
+    ) -> Result<()> {
+        debug_assert!(!self.meta.discard());
+        let mut wr = io::Cursor::new(self.buffer_mut());
+        bincode::serialize_into(&mut wr, data)?;
+        self.meta.size = wr.position() as usize;
+        if let Some(dest) = dest {
+            self.meta.set_socket_addr(dest);
+        }
+        Ok(())
+    }
+
+    pub fn deserialize_slice<T, I>(&self, index: I) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+        I: SliceIndex<[u8], Output = [u8]>,
+    {
+        let bytes = self.data(index).ok_or(bincode::ErrorKind::SizeLimit)?;
+        bincode::options()
+            .with_limit(PACKET_DATA_SIZE as u64)
+            .with_fixint_encoding()
+            .reject_trailing_bytes()
+            .deserialize(bytes)
+    }
+}
+
+impl<const N: usize> fmt::Debug for GenericPacket<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Packet {{ size: {:?}, addr: {:?} }}",
+            self.meta.size,
+            self.meta.socket_addr()
+        )
+    }
+}
+
+#[allow(clippy::uninit_assumed_init)]
+impl<const N: usize> Default for GenericPacket<N> {
+    fn default() -> Self {
+        let buffer = std::mem::MaybeUninit::<[u8; N]>::uninit();
+        Self {
+            buffer: unsafe { buffer.assume_init() },
+            meta: Meta::default(),
+        }
+    }
+}
+
+impl<const N: usize> PartialEq for GenericPacket<N> {
+    fn eq(&self, other: &Self) -> bool {
+        self.meta() == other.meta() && self.data(..) == other.data(..)
+    }
+}
+
+// START_DUPLICATE: DELETE ONCE EVERYTHING SWITCHED OVER
 #[serde_as]
 #[derive(Clone, Eq, Serialize, Deserialize)]
 #[repr(C)]
@@ -184,6 +315,8 @@ impl PartialEq for Packet {
         self.meta() == other.meta() && self.data(..) == other.data(..)
     }
 }
+// END_DUPLICATE: DELETE ONCE EVERYTHING SWITCHED OVER
+
 
 impl Meta {
     pub fn socket_addr(&self) -> SocketAddr {

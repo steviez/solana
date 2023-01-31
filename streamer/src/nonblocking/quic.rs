@@ -10,9 +10,9 @@ use {
     quinn::{Connecting, Connection, Endpoint, EndpointConfig, TokioRuntime, VarInt},
     quinn_proto::VarIntBoundsExceeded,
     rand::{thread_rng, Rng},
-    solana_perf::packet::PacketBatch,
+    solana_perf::packet::{PacketBatchSingle, VarPacketBatch},
     solana_sdk::{
-        packet::{Packet, PACKET_DATA_SIZE},
+        packet::{GenericPacket, PACKET_DATA_SIZE},
         pubkey::Pubkey,
         quic::{
             QUIC_CONNECTION_HANDSHAKE_TIMEOUT_MS, QUIC_MAX_STAKED_CONCURRENT_STREAMS,
@@ -59,7 +59,7 @@ pub fn spawn_server(
     sock: UdpSocket,
     keypair: &Keypair,
     gossip_host: IpAddr,
-    packet_sender: Sender<PacketBatch>,
+    packet_sender: Sender<VarPacketBatch>,
     exit: Arc<AtomicBool>,
     max_connections_per_peer: usize,
     staked_nodes: Arc<RwLock<StakedNodes>>,
@@ -92,7 +92,7 @@ pub fn spawn_server(
 
 pub async fn run_server(
     incoming: Endpoint,
-    packet_sender: Sender<PacketBatch>,
+    packet_sender: Sender<VarPacketBatch>,
     exit: Arc<AtomicBool>,
     max_connections_per_peer: usize,
     staked_nodes: Arc<RwLock<StakedNodes>>,
@@ -229,7 +229,7 @@ enum ConnectionHandlerError {
 }
 
 struct NewConnectionHandlerParams {
-    packet_sender: Sender<PacketBatch>,
+    packet_sender: Sender<VarPacketBatch>,
     remote_pubkey: Option<Pubkey>,
     stake: u64,
     total_stake: u64,
@@ -241,7 +241,7 @@ struct NewConnectionHandlerParams {
 
 impl NewConnectionHandlerParams {
     fn new_unstaked(
-        packet_sender: Sender<PacketBatch>,
+        packet_sender: Sender<VarPacketBatch>,
         max_connections_per_peer: usize,
         stats: Arc<StreamStats>,
     ) -> NewConnectionHandlerParams {
@@ -415,7 +415,7 @@ async fn setup_connection(
     connecting: Connecting,
     unstaked_connection_table: Arc<Mutex<ConnectionTable>>,
     staked_connection_table: Arc<Mutex<ConnectionTable>>,
-    packet_sender: Sender<PacketBatch>,
+    packet_sender: Sender<VarPacketBatch>,
     max_connections_per_peer: usize,
     staked_nodes: Arc<RwLock<StakedNodes>>,
     max_staked_connections: usize,
@@ -522,7 +522,7 @@ async fn setup_connection(
 #[allow(clippy::too_many_arguments)]
 async fn handle_connection(
     connection: Connection,
-    packet_sender: Sender<PacketBatch>,
+    packet_sender: Sender<VarPacketBatch>,
     remote_addr: SocketAddr,
     remote_pubkey: Option<Pubkey>,
     last_update: Arc<AtomicU64>,
@@ -627,9 +627,9 @@ async fn handle_connection(
 // Return true if the server should drop the stream
 fn handle_chunk(
     chunk: &Result<Option<quinn::Chunk>, quinn::ReadError>,
-    maybe_batch: &mut Option<PacketBatch>,
+    maybe_batch: &mut Option<PacketBatchSingle>,
     remote_addr: &SocketAddr,
-    packet_sender: &Sender<PacketBatch>,
+    packet_sender: &Sender<VarPacketBatch>,
     stats: Arc<StreamStats>,
     stake: u64,
     peer_type: ConnectionPeerType,
@@ -658,8 +658,8 @@ fn handle_chunk(
 
                 // chunk looks valid
                 if maybe_batch.is_none() {
-                    let mut batch = PacketBatch::with_capacity(1);
-                    let mut packet = Packet::default();
+                    let mut batch = PacketBatchSingle::with_capacity(1);
+                    let mut packet = GenericPacket::<PACKET_DATA_SIZE>::default();
                     packet.meta_mut().set_socket_addr(remote_addr);
                     packet.meta_mut().sender_stake = stake;
                     batch.push(packet);
@@ -697,6 +697,7 @@ fn handle_chunk(
                 // done receiving chunks
                 if let Some(batch) = maybe_batch.take() {
                     let len = batch[0].meta().size;
+                    let batch = VarPacketBatch::Single(batch);
                     if let Err(e) = packet_sender.send(batch) {
                         stats
                             .total_packet_batch_send_err
@@ -1015,7 +1016,7 @@ pub mod test {
     ) -> (
         JoinHandle<()>,
         Arc<AtomicBool>,
-        crossbeam_channel::Receiver<PacketBatch>,
+        crossbeam_channel::Receiver<VarPacketBatch>,
         SocketAddr,
         Arc<StreamStats>,
     ) {
@@ -1063,7 +1064,7 @@ pub mod test {
             .expect("Failed in waiting")
     }
 
-    pub async fn check_timeout(receiver: Receiver<PacketBatch>, server_address: SocketAddr) {
+    pub async fn check_timeout(receiver: Receiver<VarPacketBatch>, server_address: SocketAddr) {
         let conn1 = make_client_endpoint(&server_address, None).await;
         let total = 30;
         for i in 0..total {
@@ -1105,7 +1106,7 @@ pub mod test {
     }
 
     pub async fn check_multiple_streams(
-        receiver: Receiver<PacketBatch>,
+        receiver: Receiver<VarPacketBatch>,
         server_address: SocketAddr,
     ) {
         let conn1 = Arc::new(make_client_endpoint(&server_address, None).await);
@@ -1145,7 +1146,7 @@ pub mod test {
     }
 
     pub async fn check_multiple_writes(
-        receiver: Receiver<PacketBatch>,
+        receiver: Receiver<VarPacketBatch>,
         server_address: SocketAddr,
         client_keypair: Option<&Keypair>,
     ) {
