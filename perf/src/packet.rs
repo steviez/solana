@@ -1,5 +1,5 @@
 //! The `packet` module defines data structures and methods to pull data from the network.
-pub use solana_sdk::packet::{Meta, Packet, PacketFlags, PACKET_DATA_SIZE};
+pub use solana_sdk::packet::{GenericPacket, Meta, Packet, PacketFlags, PACKET_DATA_SIZE};
 use {
     crate::{cuda_runtime::PinnedVec, recycler::Recycler},
     bincode::config::Options,
@@ -19,14 +19,16 @@ pub const PACKETS_PER_BATCH: usize = 64;
 pub const NUM_RCVMMSGS: usize = 64;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct PacketBatch {
-    packets: PinnedVec<Packet>,
+pub struct GenericPacketBatch<const N: usize> {
+    packets: PinnedVec<GenericPacket<N>>,
 }
+pub type GenericPacketBatchRecycler<const N: usize> = Recycler<PinnedVec<GenericPacket<N>>>;
 
+pub type PacketBatch = GenericPacketBatch<PACKET_DATA_SIZE>;
 pub type PacketBatchRecycler = Recycler<PinnedVec<Packet>>;
 
-impl PacketBatch {
-    pub fn new(packets: Vec<Packet>) -> Self {
+impl<const N: usize> GenericPacketBatch<N> {
+    pub fn new(packets: Vec<GenericPacket<N>>) -> Self {
         let packets = PinnedVec::from_vec(packets);
         Self { packets }
     }
@@ -43,7 +45,7 @@ impl PacketBatch {
     }
 
     pub fn new_unpinned_with_recycler(
-        recycler: PacketBatchRecycler,
+        recycler: GenericPacketBatchRecycler<N>,
         capacity: usize,
         name: &'static str,
     ) -> Self {
@@ -53,7 +55,7 @@ impl PacketBatch {
     }
 
     pub fn new_with_recycler(
-        recycler: PacketBatchRecycler,
+        recycler: GenericPacketBatchRecycler<N>,
         capacity: usize,
         name: &'static str,
     ) -> Self {
@@ -63,9 +65,9 @@ impl PacketBatch {
     }
 
     pub fn new_with_recycler_data(
-        recycler: &PacketBatchRecycler,
+        recycler: &GenericPacketBatchRecycler<N>,
         name: &'static str,
-        mut packets: Vec<Packet>,
+        mut packets: Vec<GenericPacket<N>>,
     ) -> Self {
         let mut batch = Self::new_with_recycler(recycler.clone(), packets.len(), name);
         batch.packets.append(&mut packets);
@@ -73,18 +75,18 @@ impl PacketBatch {
     }
 
     pub fn new_unpinned_with_recycler_data_and_dests<T: Serialize>(
-        recycler: PacketBatchRecycler,
+        recycler: GenericPacketBatchRecycler<N>,
         name: &'static str,
         dests_and_data: &[(SocketAddr, T)],
     ) -> Self {
         let mut batch = Self::new_unpinned_with_recycler(recycler, dests_and_data.len(), name);
         batch
             .packets
-            .resize(dests_and_data.len(), Packet::default());
+            .resize(dests_and_data.len(), GenericPacket::default());
 
         for ((addr, data), packet) in dests_and_data.iter().zip(batch.packets.iter_mut()) {
             if !addr.ip().is_unspecified() && addr.port() != 0 {
-                if let Err(e) = Packet::populate_packet(packet, Some(addr), &data) {
+                if let Err(e) = GenericPacket::populate_packet(packet, Some(addr), &data) {
                     // TODO: This should never happen. Instead the caller should
                     // break the payload into smaller messages, and here any errors
                     // should be propagated.
@@ -98,16 +100,16 @@ impl PacketBatch {
     }
 
     pub fn new_unpinned_with_recycler_data(
-        recycler: &PacketBatchRecycler,
+        recycler: &GenericPacketBatchRecycler<N>,
         name: &'static str,
-        mut packets: Vec<Packet>,
+        mut packets: Vec<GenericPacket<N>>,
     ) -> Self {
         let mut batch = Self::new_unpinned_with_recycler(recycler.clone(), packets.len(), name);
         batch.packets.append(&mut packets);
         batch
     }
 
-    pub fn resize(&mut self, new_len: usize, value: Packet) {
+    pub fn resize(&mut self, new_len: usize, value: GenericPacket<N>) {
         self.packets.resize(new_len, value)
     }
 
@@ -115,7 +117,7 @@ impl PacketBatch {
         self.packets.truncate(len);
     }
 
-    pub fn push(&mut self, packet: Packet) {
+    pub fn push(&mut self, packet: GenericPacket<N>) {
         self.packets.push(packet);
     }
 
@@ -137,15 +139,15 @@ impl PacketBatch {
         self.packets.is_empty()
     }
 
-    pub fn as_ptr(&self) -> *const Packet {
+    pub fn as_ptr(&self) -> *const GenericPacket<N> {
         self.packets.as_ptr()
     }
 
-    pub fn iter(&self) -> Iter<'_, Packet> {
+    pub fn iter(&self) -> Iter<'_, GenericPacket<N>> {
         self.packets.iter()
     }
 
-    pub fn iter_mut(&mut self) -> IterMut<'_, Packet> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, GenericPacket<N>> {
         self.packets.iter_mut()
     }
 
@@ -162,7 +164,7 @@ impl PacketBatch {
     }
 }
 
-impl<I: SliceIndex<[Packet]>> Index<I> for PacketBatch {
+impl<const N: usize, I: SliceIndex<[GenericPacket<N>]>> Index<I> for GenericPacketBatch<N> {
     type Output = I::Output;
 
     #[inline]
@@ -171,40 +173,40 @@ impl<I: SliceIndex<[Packet]>> Index<I> for PacketBatch {
     }
 }
 
-impl<I: SliceIndex<[Packet]>> IndexMut<I> for PacketBatch {
+impl<const N: usize, I: SliceIndex<[GenericPacket<N>]>> IndexMut<I> for GenericPacketBatch<N> {
     #[inline]
     fn index_mut(&mut self, index: I) -> &mut Self::Output {
         &mut self.packets[index]
     }
 }
 
-impl<'a> IntoIterator for &'a PacketBatch {
-    type Item = &'a Packet;
-    type IntoIter = Iter<'a, Packet>;
+impl<'a, const N: usize> IntoIterator for &'a GenericPacketBatch<N> {
+    type Item = &'a GenericPacket<N>;
+    type IntoIter = Iter<'a, GenericPacket<N>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.packets.iter()
     }
 }
 
-impl<'a> IntoParallelIterator for &'a PacketBatch {
-    type Iter = rayon::slice::Iter<'a, Packet>;
-    type Item = &'a Packet;
+impl<'a, const N: usize> IntoParallelIterator for &'a GenericPacketBatch<N> {
+    type Iter = rayon::slice::Iter<'a, GenericPacket<N>>;
+    type Item = &'a GenericPacket<N>;
     fn into_par_iter(self) -> Self::Iter {
         self.packets.par_iter()
     }
 }
 
-impl<'a> IntoParallelIterator for &'a mut PacketBatch {
-    type Iter = rayon::slice::IterMut<'a, Packet>;
-    type Item = &'a mut Packet;
+impl<'a, const N: usize> IntoParallelIterator for &'a mut GenericPacketBatch<N> {
+    type Iter = rayon::slice::IterMut<'a, GenericPacket<N>>;
+    type Item = &'a mut GenericPacket<N>;
     fn into_par_iter(self) -> Self::Iter {
         self.packets.par_iter_mut()
     }
 }
 
-impl From<PacketBatch> for Vec<Packet> {
-    fn from(batch: PacketBatch) -> Self {
+impl<const N: usize> From<GenericPacketBatch<N>> for Vec<GenericPacket<N>> {
+    fn from(batch: GenericPacketBatch<N>) -> Self {
         batch.packets.into()
     }
 }

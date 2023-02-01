@@ -70,16 +70,20 @@ pub struct Meta {
 #[serde_as]
 #[derive(Clone, Eq, Serialize, Deserialize)]
 #[repr(C)]
-pub struct Packet {
+pub struct GenericPacket<const N: usize> {
     // Bytes past Packet.meta.size are not valid to read from.
     // Use Packet.data(index) to read from the buffer.
     #[serde_as(as = "Bytes")]
-    buffer: [u8; PACKET_DATA_SIZE],
-    meta: Meta,
+    pub buffer: [u8; N],
+    pub meta: Meta,
 }
 
-impl Packet {
-    pub fn new(buffer: [u8; PACKET_DATA_SIZE], meta: Meta) -> Self {
+pub type Packet = GenericPacket<PACKET_DATA_SIZE>;
+
+impl<const N: usize> GenericPacket<N> {
+    pub const BUFFER_LEN: usize = N;
+
+    pub fn new(buffer: [u8; N], meta: Meta) -> Self {
         Self { buffer, meta }
     }
 
@@ -101,6 +105,12 @@ impl Packet {
         } else {
             self.buffer.get(..self.meta.size)?.get(index)
         }
+    }
+
+    #[inline]
+    pub fn buffer(&self) -> &[u8] {
+        debug_assert!(!self.meta.discard());
+        &self.buffer[..]
     }
 
     /// Returns a mutable reference to the entirety of the underlying buffer to
@@ -157,7 +167,7 @@ impl Packet {
     }
 }
 
-impl fmt::Debug for Packet {
+impl<const N: usize> fmt::Debug for GenericPacket<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -169,9 +179,9 @@ impl fmt::Debug for Packet {
 }
 
 #[allow(clippy::uninit_assumed_init)]
-impl Default for Packet {
+impl<const N: usize> Default for GenericPacket<N> {
     fn default() -> Self {
-        let buffer = std::mem::MaybeUninit::<[u8; PACKET_DATA_SIZE]>::uninit();
+        let buffer = std::mem::MaybeUninit::<[u8; N]>::uninit();
         Self {
             buffer: unsafe { buffer.assume_init() },
             meta: Meta::default(),
@@ -179,7 +189,7 @@ impl Default for Packet {
     }
 }
 
-impl PartialEq for Packet {
+impl<const N: usize> PartialEq for GenericPacket<N> {
     fn eq(&self, other: &Self) -> bool {
         self.meta() == other.meta() && self.data(..) == other.data(..)
     }
