@@ -6,7 +6,7 @@
 use {
     crate::{
         cuda_runtime::PinnedVec,
-        packet::{Packet, PacketBatch, PacketFlags, PACKET_DATA_SIZE},
+        packet::{BatchPacketViewMut, Packet, PacketBatch, PacketFlags, PACKET_DATA_SIZE},
         perf_libs,
         recycler::Recycler,
     },
@@ -315,7 +315,7 @@ fn do_get_packet_offsets(
     ))
 }
 
-pub fn check_for_tracer_packet(packet: &mut Packet) -> bool {
+pub fn check_for_tracer_packet(packet: &mut BatchPacketViewMut) -> bool {
     let first_pubkey_start: usize = TRACER_KEY_OFFSET_IN_TRANSACTION;
     let first_pubkey_end = match first_pubkey_start.checked_add(size_of::<Pubkey>()) {
         Some(offset) => offset,
@@ -324,7 +324,7 @@ pub fn check_for_tracer_packet(packet: &mut Packet) -> bool {
     // Check for tracer pubkey
     match packet.data(first_pubkey_start..first_pubkey_end) {
         Some(pubkey) if pubkey == TRACER_KEY.as_ref() => {
-            packet.meta_mut().set_tracer(true);
+            packet.meta.set_tracer(true);
             true
         }
         _ => false,

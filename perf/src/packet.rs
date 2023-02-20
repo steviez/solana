@@ -1,5 +1,8 @@
 //! The `packet` module defines data structures and methods to pull data from the network.
-pub use solana_sdk::packet::{GenericPacket, Meta, Packet, PacketFlags, PACKET_DATA_SIZE};
+pub use solana_sdk::packet::{
+    GenericPacket, Meta, Packet, PacketFlags, PACKET_DATA_1X_SIZE, PACKET_DATA_2X_SIZE,
+    PACKET_DATA_3X_SIZE, PACKET_DATA_SIZE,
+};
 use {
     crate::{cuda_runtime::PinnedVec, recycler::Recycler},
     bincode::config::Options,
@@ -26,6 +29,178 @@ pub type GenericPacketBatchRecycler<const N: usize> = Recycler<PinnedVec<Generic
 
 pub type PacketBatch = GenericPacketBatch<PACKET_DATA_SIZE>;
 pub type PacketBatchRecycler = Recycler<PinnedVec<Packet>>;
+
+pub type PacketBatchSingle = GenericPacketBatch<PACKET_DATA_1X_SIZE>;
+pub type PacketBatchDouble = GenericPacketBatch<PACKET_DATA_2X_SIZE>;
+pub type PacketBatchTriple = GenericPacketBatch<PACKET_DATA_3X_SIZE>;
+
+pub enum VarPacketBatch {
+    Single(PacketBatchSingle),
+    Double(PacketBatchDouble),
+    Triple(PacketBatchTriple),
+}
+
+macro_rules! dispatch {
+    ($vis:vis fn $func_name:ident(&self $(, $arg:ident : $type:ty)*) $(-> $out:ty)?) => {
+        $vis fn $func_name(&self $(, $arg: $ty)*) $(-> $out)? {
+            match self {
+                Self::Single(batch) => batch.$func_name(),
+                Self::Double(batch) => batch.$func_name(),
+                Self::Triple(batch) => batch.$func_name(),
+            }
+        }
+    }
+}
+
+impl VarPacketBatch {
+    dispatch!(pub fn len(&self) -> usize);
+
+    pub fn iter(&self) -> VarPacketBatchIter<'_> {
+        match self {
+            Self::Single(batch) => VarPacketBatchIter::Single(batch.iter()),
+            Self::Double(batch) => VarPacketBatchIter::Double(batch.iter()),
+            Self::Triple(batch) => VarPacketBatchIter::Triple(batch.iter()),
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> VarPacketBatchIterMut<'_> {
+        match self {
+            Self::Single(batch) => VarPacketBatchIterMut::Single(batch.iter_mut()),
+            Self::Double(batch) => VarPacketBatchIterMut::Double(batch.iter_mut()),
+            Self::Triple(batch) => VarPacketBatchIterMut::Triple(batch.iter_mut()),
+        }
+    }
+}
+
+/// An immutable view of a packet in a VarPacketBatch. This view exposes a
+/// a reference to the packet's Meta as well as a slice for its' buffer.
+/// The buffer slice can have variable length depending on what typee of
+/// packets are actually contained in the VarPacketBatch.
+pub struct BatchPacketView<'a> {
+    pub meta: &'a Meta,
+    pub buffer: &'a [u8],
+}
+
+impl BatchPacketView<'_> {
+    /// Returns an immutable reference to the underlying buffer up to
+    /// packet.meta.size. The rest of the buffer is not valid to read from.
+    /// packet.data(..) returns packet.buffer.get(..packet.meta.size).
+    /// Returns None if the index is invalid or if the packet is already marked
+    /// as discard.
+    #[inline]
+    pub fn data<I>(&self, index: I) -> Option<&<I as SliceIndex<[u8]>>::Output>
+    where
+        I: SliceIndex<[u8]>,
+    {
+        // If the packet is marked as discard, it is either invalid or
+        // otherwise should be ignored, and so the payload should not be read
+        // from.
+        if self.meta.discard() {
+            None
+        } else {
+            self.buffer.get(..self.meta.size)?.get(index)
+        }
+    }
+}
+
+impl<'a, const N: usize> From<&'a GenericPacket<N>> for BatchPacketView<'a> {
+    fn from(packet: &'a GenericPacket<N>) -> Self {
+        Self {
+            meta: &packet.meta,
+            buffer: &packet.buffer,
+        }
+    }
+}
+
+/// Similar to BatchPacketView, but mutable access to Meta and buffer.
+pub struct BatchPacketViewMut<'a> {
+    pub meta: &'a mut Meta,
+    pub buffer: &'a mut [u8],
+}
+
+impl BatchPacketViewMut<'_> {
+    /// Returns an immutable reference to the underlying buffer up to
+    /// packet.meta.size. The rest of the buffer is not valid to read from.
+    /// packet.data(..) returns packet.buffer.get(..packet.meta.size).
+    /// Returns None if the index is invalid or if the packet is already marked
+    /// as discard.
+    #[inline]
+    pub fn data<I>(&self, index: I) -> Option<&<I as SliceIndex<[u8]>>::Output>
+    where
+        I: SliceIndex<[u8]>,
+    {
+        // If the packet is marked as discard, it is either invalid or
+        // otherwise should be ignored, and so the payload should not be read
+        // from.
+        if self.meta.discard() {
+            None
+        } else {
+            self.buffer.get(..self.meta.size)?.get(index)
+        }
+    }
+}
+
+impl<'a, const N: usize> From<&'a mut GenericPacket<N>> for BatchPacketViewMut<'a> {
+    fn from(packet: &'a mut GenericPacket<N>) -> Self {
+        Self {
+            meta: &mut packet.meta,
+            buffer: &mut packet.buffer,
+        }
+    }
+}
+
+/*
+impl<'a> From<BatchPacketViewMut<'a>> for BatchPacketView<'a> {
+    fn from(view_mut: BatchPacketViewMut<'a>) -> Self {
+        Self {
+            meta: view_mut.meta,
+            buffer: view_mut.buffer,
+        }
+    }
+}
+*/
+
+/// An iterator that provides TxPacketView's over an entire batch
+pub enum VarPacketBatchIter<'a> {
+    Single(Iter<'a, GenericPacket<PACKET_DATA_1X_SIZE>>),
+    Double(Iter<'a, GenericPacket<PACKET_DATA_2X_SIZE>>),
+    Triple(Iter<'a, GenericPacket<PACKET_DATA_3X_SIZE>>),
+}
+
+/// An iterator that provides TxPacketViewMut's over an entire batch
+pub enum VarPacketBatchIterMut<'a> {
+    Single(IterMut<'a, GenericPacket<PACKET_DATA_1X_SIZE>>),
+    Double(IterMut<'a, GenericPacket<PACKET_DATA_2X_SIZE>>),
+    Triple(IterMut<'a, GenericPacket<PACKET_DATA_3X_SIZE>>),
+}
+
+macro_rules! dispatch_iter {
+    ($iter_type:ty => $item_type:ty) => {
+        impl<'a> Iterator for $iter_type {
+            type Item = $item_type;
+            fn next(&mut self) -> Option<Self::Item> {
+                match self {
+                    Self::Single(iter) => iter.next().map(|p| Self::Item::from(p)),
+                    Self::Double(iter) => iter.next().map(|p| Self::Item::from(p)),
+                    Self::Triple(iter) => iter.next().map(|p| Self::Item::from(p)),
+                }
+            }
+        }
+
+        impl<'a> DoubleEndedIterator for $iter_type {
+            fn next_back(&mut self) -> Option<Self::Item> {
+                match self {
+                    Self::Single(iter) => iter.next_back().map(|p| Self::Item::from(p)),
+                    Self::Double(iter) => iter.next_back().map(|p| Self::Item::from(p)),
+                    Self::Triple(iter) => iter.next_back().map(|p| Self::Item::from(p)),
+                }
+            }
+        }
+    };
+}
+
+dispatch_iter!(VarPacketBatchIter<'a> => BatchPacketView<'a>);
+dispatch_iter!(VarPacketBatchIterMut<'a> => BatchPacketViewMut<'a>);
 
 impl<const N: usize> GenericPacketBatch<N> {
     pub fn new(packets: Vec<GenericPacket<N>>) -> Self {

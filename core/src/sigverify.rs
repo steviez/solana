@@ -12,7 +12,12 @@ use {
         banking_trace::{BankingPacketBatch, BankingPacketSender},
         sigverify_stage::SigVerifyServiceError,
     },
-    solana_perf::{cuda_runtime::PinnedVec, packet::PacketBatch, recycler::Recycler, sigverify},
+    solana_perf::{
+        cuda_runtime::PinnedVec,
+        packet::{BatchPacketViewMut, PacketBatch},
+        recycler::Recycler,
+        sigverify,
+    },
     solana_sdk::{packet::Packet, saturating_add_assign},
 };
 
@@ -83,12 +88,12 @@ impl TransactionSigVerifier {
     #[inline(always)]
     pub fn process_received_packet(
         &mut self,
-        packet: &mut Packet,
+        packet: &mut BatchPacketViewMut,
         removed_before_sigverify_stage: bool,
         is_dup: bool,
     ) {
         sigverify::check_for_tracer_packet(packet);
-        if packet.meta().is_tracer_packet() {
+        if packet.meta.is_tracer_packet() {
             if removed_before_sigverify_stage {
                 self.tracer_packet_stats
                     .total_removed_before_sigverify_stage += 1;
@@ -103,8 +108,9 @@ impl TransactionSigVerifier {
     }
 
     #[inline(always)]
-    pub fn process_excess_packet(&mut self, packet: &Packet) {
-        if packet.meta().is_tracer_packet() {
+    // TODO: only need BatchPacketView here, figure out how to demote?
+    pub fn process_excess_packet(&mut self, packet: &BatchPacketViewMut) {
+        if packet.meta.is_tracer_packet() {
             self.tracer_packet_stats.total_excess_tracer_packets += 1;
         }
     }

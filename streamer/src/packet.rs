@@ -9,7 +9,8 @@ use {
 };
 pub use {
     solana_perf::packet::{
-        to_packet_batches, PacketBatch, PacketBatchRecycler, NUM_PACKETS, PACKETS_PER_BATCH,
+        to_packet_batches, PacketBatch, PacketBatchRecycler, VarPacketBatch, NUM_PACKETS,
+        PACKETS_PER_BATCH,
     },
     solana_sdk::packet::{Meta, Packet, PACKET_DATA_SIZE},
 };

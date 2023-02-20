@@ -20,6 +20,10 @@ static_assertions::const_assert_eq!(PACKET_DATA_SIZE, 1232);
 ///   8 bytes is the size of the fragment header
 pub const PACKET_DATA_SIZE: usize = 1280 - 40 - 8;
 
+pub const PACKET_DATA_1X_SIZE: usize = PACKET_DATA_SIZE;
+pub const PACKET_DATA_2X_SIZE: usize = PACKET_DATA_SIZE * 2;
+pub const PACKET_DATA_3X_SIZE: usize = PACKET_DATA_SIZE * 3;
+
 bitflags! {
     #[repr(C)]
     #[derive(Serialize, Deserialize)]

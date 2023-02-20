@@ -3,7 +3,7 @@
 
 use {
     crate::{
-        packet::{self, PacketBatch, PacketBatchRecycler, PACKETS_PER_BATCH},
+        packet::{self, PacketBatch, PacketBatchRecycler, VarPacketBatch, PACKETS_PER_BATCH},
         sendmmsg::{batch_send, SendPktsError},
         socket::SocketAddrSpace,
     },
@@ -36,6 +36,8 @@ pub struct StakedNodes {
 
 pub type PacketBatchReceiver = Receiver<PacketBatch>;
 pub type PacketBatchSender = Sender<PacketBatch>;
+pub type VarPacketBatchReceiver = Receiver<VarPacketBatch>;
+pub type VarPacketBatchSender = Sender<VarPacketBatch>;
 
 #[derive(Error, Debug)]
 pub enum StreamerError {
@@ -47,6 +49,9 @@ pub enum StreamerError {
 
     #[error("send packets error")]
     Send(#[from] SendError<PacketBatch>),
+
+    #[error("send packets error")]
+    SendVar(#[from] SendError<VarPacketBatch>),
 
     #[error(transparent)]
     SendPktsError(#[from] SendPktsError),
@@ -184,6 +189,90 @@ pub fn receiver(
         .unwrap()
 }
 
+pub fn receiver_var(
+    socket: Arc<UdpSocket>,
+    exit: Arc<AtomicBool>,
+    packet_batch_sender: VarPacketBatchSender,
+    recycler: PacketBatchRecycler,
+    stats: Arc<StreamerReceiveStats>,
+    coalesce_ms: u64,
+    use_pinned_memory: bool,
+    in_vote_only_mode: Option<Arc<AtomicBool>>,
+) -> JoinHandle<()> {
+    let res = socket.set_read_timeout(Some(Duration::new(1, 0)));
+    assert!(res.is_ok(), "streamer::receiver set_read_timeout error");
+    Builder::new()
+        .name("solReceiver".to_string())
+        .spawn(move || {
+            let _ = recv_loop_var(
+                &socket,
+                exit,
+                &packet_batch_sender,
+                &recycler,
+                &stats,
+                coalesce_ms,
+                use_pinned_memory,
+                in_vote_only_mode,
+            );
+        })
+        .unwrap()
+}
+
+fn recv_loop_var(
+    socket: &UdpSocket,
+    exit: Arc<AtomicBool>,
+    packet_batch_sender: &VarPacketBatchSender,
+    recycler: &PacketBatchRecycler,
+    stats: &StreamerReceiveStats,
+    coalesce_ms: u64,
+    use_pinned_memory: bool,
+    in_vote_only_mode: Option<Arc<AtomicBool>>,
+) -> Result<()> {
+    loop {
+        let mut packet_batch = if use_pinned_memory {
+            PacketBatch::new_with_recycler(recycler.clone(), PACKETS_PER_BATCH, stats.name)
+        } else {
+            PacketBatch::with_capacity(PACKETS_PER_BATCH)
+        };
+        loop {
+            // Check for exit signal, even if socket is busy
+            // (for instance the leader transaction socket)
+            if exit.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+
+            if let Some(ref in_vote_only_mode) = in_vote_only_mode {
+                if in_vote_only_mode.load(Ordering::Relaxed) {
+                    sleep(Duration::from_millis(1));
+                    continue;
+                }
+            }
+
+            if let Ok(len) = packet::recv_from(&mut packet_batch, socket, coalesce_ms) {
+                if len > 0 {
+                    let StreamerReceiveStats {
+                        packets_count,
+                        packet_batches_count,
+                        full_packet_batches_count,
+                        max_channel_len,
+                        ..
+                    } = stats;
+
+                    packets_count.fetch_add(len, Ordering::Relaxed);
+                    packet_batches_count.fetch_add(1, Ordering::Relaxed);
+                    max_channel_len.fetch_max(packet_batch_sender.len(), Ordering::Relaxed);
+                    if len == PACKETS_PER_BATCH {
+                        full_packet_batches_count.fetch_add(1, Ordering::Relaxed);
+                    }
+
+                    packet_batch_sender.send(VarPacketBatch::Single(packet_batch))?;
+                }
+                break;
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct SendStats {
     bytes: u64,
@@ -314,8 +403,8 @@ fn recv_send(
 }
 
 pub fn recv_vec_packet_batches(
-    recvr: &Receiver<Vec<PacketBatch>>,
-) -> Result<(Vec<PacketBatch>, usize, Duration)> {
+    recvr: &Receiver<Vec<VarPacketBatch>>,
+) -> Result<(Vec<VarPacketBatch>, usize, Duration)> {
     let timer = Duration::new(1, 0);
     let mut packet_batches = recvr.recv_timeout(timer)?;
     let recv_start = Instant::now();
@@ -342,8 +431,8 @@ pub fn recv_vec_packet_batches(
 }
 
 pub fn recv_packet_batches(
-    recvr: &PacketBatchReceiver,
-) -> Result<(Vec<PacketBatch>, usize, Duration)> {
+    recvr: &VarPacketBatchReceiver,
+) -> Result<(Vec<VarPacketBatch>, usize, Duration)> {
     let timer = Duration::new(1, 0);
     let packet_batch = recvr.recv_timeout(timer)?;
     let recv_start = Instant::now();

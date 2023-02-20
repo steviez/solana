@@ -4,14 +4,17 @@ use {
     crate::result::{Error, Result},
     crossbeam_channel::{unbounded, RecvTimeoutError},
     solana_metrics::{inc_new_counter_debug, inc_new_counter_info},
-    solana_perf::{packet::PacketBatchRecycler, recycler::Recycler},
+    solana_perf::{
+        packet::{BatchPacketViewMut, PacketBatchRecycler},
+        recycler::Recycler,
+    },
     solana_poh::poh_recorder::PohRecorder,
     solana_sdk::{
         clock::{DEFAULT_TICKS_PER_SLOT, HOLD_TRANSACTIONS_SLOT_OFFSET},
-        packet::{Packet, PacketFlags},
+        packet::PacketFlags,
     },
     solana_streamer::streamer::{
-        self, PacketBatchReceiver, PacketBatchSender, StreamerReceiveStats,
+        self, StreamerReceiveStats, VarPacketBatchReceiver, VarPacketBatchSender,
     },
     solana_tpu_client::tpu_client::DEFAULT_TPU_ENABLE_UDP,
     std::{
@@ -38,7 +41,7 @@ impl FetchStage {
         exit: &Arc<AtomicBool>,
         poh_recorder: &Arc<RwLock<PohRecorder>>,
         coalesce_ms: u64,
-    ) -> (Self, PacketBatchReceiver, PacketBatchReceiver) {
+    ) -> (Self, VarPacketBatchReceiver, VarPacketBatchReceiver) {
         let (sender, receiver) = unbounded();
         let (vote_sender, vote_receiver) = unbounded();
         let (forward_sender, forward_receiver) = unbounded();
@@ -68,10 +71,10 @@ impl FetchStage {
         tpu_forwards_sockets: Vec<UdpSocket>,
         tpu_vote_sockets: Vec<UdpSocket>,
         exit: &Arc<AtomicBool>,
-        sender: &PacketBatchSender,
-        vote_sender: &PacketBatchSender,
-        forward_sender: &PacketBatchSender,
-        forward_receiver: PacketBatchReceiver,
+        sender: &VarPacketBatchSender,
+        vote_sender: &VarPacketBatchSender,
+        forward_sender: &VarPacketBatchSender,
+        forward_receiver: VarPacketBatchReceiver,
         poh_recorder: &Arc<RwLock<PohRecorder>>,
         coalesce_ms: u64,
         in_vote_only_mode: Option<Arc<AtomicBool>>,
@@ -97,12 +100,12 @@ impl FetchStage {
     }
 
     fn handle_forwarded_packets(
-        recvr: &PacketBatchReceiver,
-        sendr: &PacketBatchSender,
+        recvr: &VarPacketBatchReceiver,
+        sendr: &VarPacketBatchSender,
         poh_recorder: &Arc<RwLock<PohRecorder>>,
     ) -> Result<()> {
-        let mark_forwarded = |packet: &mut Packet| {
-            packet.meta_mut().flags |= PacketFlags::FORWARDED;
+        let mark_forwarded = |packet: BatchPacketViewMut| {
+            packet.meta.flags |= PacketFlags::FORWARDED;
         };
 
         let mut packet_batch = recvr.recv()?;
@@ -144,10 +147,10 @@ impl FetchStage {
         tpu_forwards_sockets: Vec<Arc<UdpSocket>>,
         tpu_vote_sockets: Vec<Arc<UdpSocket>>,
         exit: &Arc<AtomicBool>,
-        sender: &PacketBatchSender,
-        vote_sender: &PacketBatchSender,
-        forward_sender: &PacketBatchSender,
-        forward_receiver: PacketBatchReceiver,
+        sender: &VarPacketBatchSender,
+        vote_sender: &VarPacketBatchSender,
+        forward_sender: &VarPacketBatchSender,
+        forward_receiver: VarPacketBatchReceiver,
         poh_recorder: &Arc<RwLock<PohRecorder>>,
         coalesce_ms: u64,
         in_vote_only_mode: Option<Arc<AtomicBool>>,
@@ -161,7 +164,7 @@ impl FetchStage {
             tpu_sockets
                 .into_iter()
                 .map(|socket| {
-                    streamer::receiver(
+                    streamer::receiver_var(
                         socket,
                         exit.clone(),
                         sender.clone(),
@@ -182,7 +185,7 @@ impl FetchStage {
             tpu_forwards_sockets
                 .into_iter()
                 .map(|socket| {
-                    streamer::receiver(
+                    streamer::receiver_var(
                         socket,
                         exit.clone(),
                         forward_sender.clone(),
@@ -202,7 +205,7 @@ impl FetchStage {
         let tpu_vote_threads: Vec<_> = tpu_vote_sockets
             .into_iter()
             .map(|socket| {
-                streamer::receiver(
+                streamer::receiver_var(
                     socket,
                     exit.clone(),
                     vote_sender.clone(),

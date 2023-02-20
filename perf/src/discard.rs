@@ -1,10 +1,10 @@
 use {
-    crate::packet::PacketBatch,
+    crate::packet::VarPacketBatch,
     rand::{thread_rng, Rng},
 };
 
 pub fn discard_batches_randomly(
-    batches: &mut Vec<PacketBatch>,
+    batches: &mut Vec<VarPacketBatch>,
     max_packets: usize,
     mut total_packets: usize,
 ) -> usize {

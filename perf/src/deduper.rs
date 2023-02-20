@@ -1,7 +1,7 @@
 //! Utility to deduplicate baches of incoming network packets.
 
 use {
-    crate::packet::{Packet, PacketBatch},
+    crate::packet::{BatchPacketViewMut, VarPacketBatch},
     ahash::AHasher,
     rand::{thread_rng, Rng},
     solana_sdk::saturating_add_assign,
@@ -51,7 +51,8 @@ impl Deduper {
     }
 
     /// Compute hash from packet data, returns (hash, bin_pos).
-    fn compute_hash(&self, packet: &Packet) -> (u64, usize) {
+    // TODO: only need BatchPacketView here, figure out how to demote?
+    fn compute_hash(&self, packet: &BatchPacketViewMut) -> (u64, usize) {
         let mut hasher = AHasher::new_with_keys(self.seed.0, self.seed.1);
         hasher.write(packet.data(..).unwrap_or_default());
         let h = hasher.finish();
@@ -61,9 +62,9 @@ impl Deduper {
     }
 
     // Deduplicates packets and returns 1 if packet is to be discarded. Else, 0.
-    fn dedup_packet(&self, packet: &mut Packet) -> u64 {
+    fn dedup_packet(&self, packet: &mut BatchPacketViewMut) -> u64 {
         // If this packet was already marked as discard, drop it
-        if packet.meta().discard() {
+        if packet.meta.discard() {
             return 1;
         }
         let (hash, pos) = self.compute_hash(packet);
@@ -75,7 +76,7 @@ impl Deduper {
             self.filter[pos].store(hash, Ordering::Relaxed);
         }
         if hash == prev & hash {
-            packet.meta_mut().set_discard(true);
+            packet.meta.set_discard(true);
             return 1;
         }
         0
@@ -83,14 +84,14 @@ impl Deduper {
 
     pub fn dedup_packets_and_count_discards(
         &self,
-        batches: &mut [PacketBatch],
-        mut process_received_packet: impl FnMut(&mut Packet, bool, bool),
+        batches: &mut [VarPacketBatch],
+        mut process_received_packet: impl FnMut(BatchPacketViewMut, bool, bool),
     ) -> u64 {
         let mut num_removed: u64 = 0;
         batches.iter_mut().for_each(|batch| {
-            batch.iter_mut().for_each(|p| {
-                let removed_before_sigverify = p.meta().discard();
-                let is_duplicate = self.dedup_packet(p);
+            batch.iter_mut().for_each(|mut p| {
+                let removed_before_sigverify = p.meta.discard();
+                let is_duplicate = self.dedup_packet(&mut p);
                 if is_duplicate == 1 {
                     saturating_add_assign!(num_removed, 1);
                 }
