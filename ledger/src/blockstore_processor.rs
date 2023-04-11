@@ -1317,6 +1317,24 @@ fn process_next_slots(
         return Ok(());
     }
 
+    use jemalloc_ctl::{Access, AsName};
+    // Before turn of epoch, dump a profile and enable profiling
+    if bank.slot() == 185327999 {
+        info!("jemalloc profile dump and enable profiling");
+        let dump_name = b"prof.dump\0".name();
+        dump_name.write(0usize).expect("jemalloc profile dump");
+
+        let active_name = b"prof.active\0".name();
+        active_name.write(true).expect("jemalloc enable profiling");
+    } else if bank.slot() == 185328200 {
+        info!("jemalloc profile dump and disable profiling");
+        let dump_name = b"prof.dump\0".name();
+        dump_name.write(0usize).expect("jemalloc profile dump");
+
+        let active_name = b"prof.active\0".name();
+        active_name.write(false).expect("jemalloc enable profiling");
+    }
+
     // This is a fork point if there are multiple children, create a new child bank for each fork
     for next_slot in &meta.next_slots {
         let skip_next_slot = halt_at_slot
@@ -1410,6 +1428,7 @@ fn load_frozen_forks(
             timing.details.per_program_timings.clear();
             let (meta, bank, last_entry_hash) = pending_slots.pop().unwrap();
             let slot = bank.slot();
+
             if last_status_report.elapsed() > Duration::from_secs(2) {
                 let secs = last_status_report.elapsed().as_secs() as f32;
                 last_status_report = Instant::now();

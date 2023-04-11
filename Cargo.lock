@@ -5945,6 +5945,7 @@ dependencies = [
  "tempfile",
  "test-case",
  "thiserror",
+ "tikv-jemalloc-ctl",
  "tokio",
  "tokio-stream",
  "trees",
