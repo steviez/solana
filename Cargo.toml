@@ -120,6 +120,15 @@ homepage = "https://solanalabs.com/"
 license = "Apache-2.0"
 edition = "2021"
 
+[profile.release]
+debug = true
+
+[profile.release.package."*"]
+debug = true
+
+[profile.release.build-override]
+debug = true
+
 [workspace.dependencies]
 aes-gcm-siv = "0.10.3"
 ahash = "0.8.3"
@@ -210,7 +219,7 @@ indexmap = "1.9.2"
 indicatif = "0.17.3"
 Inflector = "0.11.4"
 itertools = "0.10.5"
-jemallocator = { package = "tikv-jemallocator", version = "0.4.1", features = ["unprefixed_malloc_on_supported_platforms"] }
+jemallocator = { package = "tikv-jemallocator", version = "0.4.1", features = ["profiling", "unprefixed_malloc_on_supported_platforms"] }
 js-sys = "0.3.59"
 json5 = "0.4.1"
 jsonrpc-core = "18.0.0"

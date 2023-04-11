@@ -4394,6 +4394,14 @@ fn main() {
                     force_update_to_open,
                 );
 
+                use jemalloc_ctl::{Access, AsName};
+
+                let dump_name = b"prof.dump\0".name();
+                dump_name.write(0usize).expect("jemalloc profile dump");
+
+                let active_name = b"prof.active\0".name();
+                active_name.write(true).expect("jemalloc enable profiling");
+
                 match blockstore.slot_meta_iterator(0) {
                     Ok(metas) => {
                         let output_format =
@@ -4456,6 +4464,7 @@ fn main() {
                         exit(1);
                     }
                 };
+                dump_name.write(0usize).expect("jemalloc profile dump");
             }
             ("analyze-storage", _) => {
                 analyze_storage(

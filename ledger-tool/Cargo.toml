@@ -19,6 +19,7 @@ dashmap = { workspace = true }
 futures = { workspace = true }
 histogram = { workspace = true }
 itertools = { workspace = true }
+jemalloc-ctl = { package = "tikv-jemalloc-ctl", version = "0.4.1" }
 log = { workspace = true }
 num_cpus = { workspace = true }
 regex = { workspace = true }
