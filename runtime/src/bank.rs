@@ -1473,6 +1473,8 @@ impl Bank {
         reward_calc_tracer: Option<impl RewardCalcTracer>,
         new_bank_options: NewBankOptions,
     ) -> Self {
+        insert_alive_bank(slot);
+
         let mut time = Measure::start("bank::new_from_parent");
         let NewBankOptions { vote_only_bank } = new_bank_options;
 
@@ -1865,6 +1867,7 @@ impl Bank {
         debug_do_not_add_builtins: bool,
         accounts_data_size_initial: u64,
     ) -> Self {
+        insert_alive_bank(bank_rc.slot);
         let now = Instant::now();
         let ancestors = Ancestors::from(&fields.ancestors);
         // For backward compatibility, we can only serialize and deserialize
@@ -7782,9 +7785,37 @@ impl TotalAccountsStats {
     }
 }
 
+lazy_static::lazy_static! {
+    static ref ALIVE_BANKS: Arc<RwLock<HashSet<Slot>>> = Arc::new(RwLock::new(HashSet::new()));
+}
+
+fn insert_alive_bank(slot: Slot) {
+    ALIVE_BANKS.write().unwrap().insert(slot);
+}
+
+// Method to be called by Bank::drop()
+fn remove_alive_bank(slot: Slot) {
+    let removed = ALIVE_BANKS.write().unwrap().remove(&slot);
+    // Slots are inserted when a Bank created so slot should always be in here.
+    assert!(removed);
+
+    if slot % 100 == 0 {
+        let banks_guard = ALIVE_BANKS.read().unwrap();
+        let mut alive_bank_slots: Vec<_> = banks_guard.iter().collect();
+        alive_bank_slots.sort();
+        warn!(
+            "{} alive banks: {:?}",
+            alive_bank_slots.len(),
+            alive_bank_slots
+        );
+    }
+}
+
 impl Drop for Bank {
     fn drop(&mut self) {
         self.bank_frozen_or_destroyed();
+        remove_alive_bank(self.slot());
+
         if let Some(drop_callback) = self.drop_callback.read().unwrap().0.as_ref() {
             drop_callback.callback(self);
         } else {
