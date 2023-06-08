@@ -57,7 +57,7 @@ use solana_stake_program::{
     stake_state::{Lockup, StakeAuthorize},
 };
 use solana_storage_program::storage_instruction::StorageAccountType;
-use solana_transaction_status::{EncodedTransaction, TransactionEncoding};
+use solana_transaction_status::{EncodedTransaction, UiTransactionEncoding};
 use solana_vote_program::vote_state::VoteAuthorize;
 use std::{
     error,
@@ -838,7 +838,7 @@ pub fn parse_command(
             _ => Err(CliError::BadParameter("Invalid signature".to_string())),
         },
         ("decode-transaction", Some(matches)) => {
-            let encoded_transaction = EncodedTransaction::Binary(
+            let encoded_transaction = EncodedTransaction::LegacyBinary(
                 matches.value_of("base58_transaction").unwrap().to_string(),
             );
             if let Some(transaction) = encoded_transaction.decode() {
@@ -1225,7 +1225,7 @@ fn process_confirm(
             if let Some(transaction_status) = status {
                 if config.verbose {
                     match rpc_client
-                        .get_confirmed_transaction(signature, TransactionEncoding::Binary)
+                        .get_confirmed_transaction(signature, UiTransactionEncoding::Binary)
                     {
                         Ok(confirmed_transaction) => {
                             println!(
