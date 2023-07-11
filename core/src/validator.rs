@@ -30,7 +30,6 @@ use {
     },
     crossbeam_channel::{bounded, unbounded, Receiver},
     lazy_static::lazy_static,
-    rand::{thread_rng, Rng},
     solana_client::connection_cache::{ConnectionCache, Protocol},
     solana_entry::poh::compute_hash_time_ns,
     solana_geyser_plugin_manager::{
@@ -58,7 +57,7 @@ use {
         leader_schedule_cache::LeaderScheduleCache,
         use_snapshot_archives_at_startup::UseSnapshotArchivesAtStartup,
     },
-    solana_measure::measure::Measure,
+    solana_measure::{measure, measure::Measure},
     solana_metrics::{datapoint_info, poh_timing_point::PohTimingSender},
     solana_poh::{
         poh_recorder::PohRecorder,
@@ -109,7 +108,7 @@ use {
         pubkey::Pubkey,
         shred_version::compute_shred_version,
         signature::{Keypair, Signer},
-        timing::timestamp,
+        timing::{timestamp, AtomicInterval},
     },
     solana_send_transaction_service::send_transaction_service,
     solana_streamer::{socket::SocketAddrSpace, streamer::StakedNodes},
@@ -124,7 +123,7 @@ use {
             Arc, RwLock,
         },
         thread::{sleep, Builder, JoinHandle},
-        time::{Duration, Instant},
+        time::Duration,
     },
     strum::VariantNames,
     strum_macros::{Display, EnumString, EnumVariantNames, IntoStaticStr},
@@ -554,15 +553,20 @@ impl Validator {
             ));
         }
 
-        if let Some(shred_version) = config.expected_shred_version {
+        if let Some(expected_shred_version) = config.expected_shred_version {
             if let Some(wait_for_supermajority_slot) = config.wait_for_supermajority {
                 *start_progress.write().unwrap() = ValidatorStartProgress::CleaningBlockStore;
-                backup_and_clear_blockstore(
+                if let Err(e) = backup_and_clear_blockstore(
                     ledger_path,
                     config,
                     wait_for_supermajority_slot + 1,
-                    shred_version,
-                );
+                    expected_shred_version,
+                ) {
+                    return Err(format!(
+                        "Failed to backup and clear shreds with incorrect \
+                        shred version from blockstore: {e}"
+                    ));
+                }
             }
         }
 
@@ -1925,85 +1929,106 @@ fn maybe_warp_slot(
     Ok(())
 }
 
+/// Searches the blockstore for data shreds with the incorrect shred version.
 fn blockstore_contains_bad_shred_version(
     blockstore: &Blockstore,
     start_slot: Slot,
-    shred_version: u16,
-) -> bool {
-    let now = Instant::now();
+    expected_shred_version: u16,
+) -> Result<bool, BlockstoreError> {
+    const TIMEOUT: u64 = 60000;
+    let timer = AtomicInterval::default();
     // Search for shreds with incompatible version in blockstore
-    if let Ok(slot_meta_iterator) = blockstore.slot_meta_iterator(start_slot) {
-        info!("Searching for incorrect shreds..");
-        for (slot, _meta) in slot_meta_iterator {
-            if let Ok(shreds) = blockstore.get_data_shreds_for_slot(slot, 0) {
-                for shred in &shreds {
-                    if shred.version() != shred_version {
-                        return true;
-                    }
-                }
-            }
-            if now.elapsed().as_secs() > 60 {
-                info!("Didn't find incorrect shreds after 60 seconds, aborting");
-                return false;
+    let slot_meta_iterator = blockstore.slot_meta_iterator(start_slot)?;
+
+    info!("Searching blockstore for shreds with incorrect version..");
+    for (slot, _meta) in slot_meta_iterator {
+        let shreds = blockstore.get_data_shreds_for_slot(slot, 0)?;
+        for shred in &shreds {
+            if shred.version() != expected_shred_version {
+                return Ok(true);
             }
         }
+        if timer.elapsed_ms() > TIMEOUT {
+            info!("Didn't find incorrect shreds after 60 seconds, aborting");
+            break;
+        }
     }
-    false
+    Ok(false)
 }
 
+/// If the blockstore contains any shreds with the incorrect shred version,
+/// copy them to a backup blockstore and purge them from the actual blockstore.
 fn backup_and_clear_blockstore(
     ledger_path: &Path,
     config: &ValidatorConfig,
     start_slot: Slot,
-    shred_version: u16,
-) {
+    expected_shred_version: u16,
+) -> Result<(), BlockstoreError> {
     let blockstore =
-        Blockstore::open_with_options(ledger_path, blockstore_options_from_config(config)).unwrap();
+        Blockstore::open_with_options(ledger_path, blockstore_options_from_config(config))?;
     let do_copy_and_clear =
-        blockstore_contains_bad_shred_version(&blockstore, start_slot, shred_version);
-
-    // If found, then copy shreds to another db and clear from start_slot
-    if do_copy_and_clear {
-        let folder_name = format!(
-            "backup_{}_{}",
-            config
-                .ledger_column_options
-                .shred_storage_type
-                .blockstore_directory(),
-            thread_rng().gen_range(0, 99999)
-        );
-        let backup_blockstore = Blockstore::open_with_options(
-            &ledger_path.join(folder_name),
-            blockstore_options_from_config(config),
-        );
-        let mut last_print = Instant::now();
-        let mut copied = 0;
-        let mut last_slot = None;
-        let slot_meta_iterator = blockstore.slot_meta_iterator(start_slot).unwrap();
-        for (slot, _meta) in slot_meta_iterator {
-            if let Ok(shreds) = blockstore.get_data_shreds_for_slot(slot, 0) {
-                if let Ok(ref backup_blockstore) = backup_blockstore {
-                    copied += shreds.len();
-                    let _ = backup_blockstore.insert_shreds(shreds, None, true);
-                }
-            }
-            if last_print.elapsed().as_millis() > 3000 {
-                info!(
-                    "Copying shreds from slot {} copied {} so far.",
-                    start_slot, copied
-                );
-                last_print = Instant::now();
-            }
-            last_slot = Some(slot);
-        }
-
-        let end_slot = last_slot.unwrap();
-        info!("Purging slots {} to {}", start_slot, end_slot);
-        blockstore.purge_from_next_slots(start_slot, end_slot);
-        blockstore.purge_slots(start_slot, end_slot, PurgeType::Exact);
-        info!("done");
+        blockstore_contains_bad_shred_version(&blockstore, start_slot, expected_shred_version)?;
+    if !do_copy_and_clear {
+        info!("No shreds with incorrect version were found in the blockstore");
+        return Ok(());
     }
-    drop(blockstore);
+
+    // .unwrap() safe because getting to this point implies blockstore has slots/shreds
+    let end_slot = blockstore.highest_slot()?.unwrap();
+
+    // Backing up the shreds that will be deleted from primary blockstore is
+    // not critical, so swallow errors from backup blockstore operations.
+    let backup_folder = format!(
+        "{}_backup_{}_{}_{}",
+        config
+            .ledger_column_options
+            .shred_storage_type
+            .blockstore_directory(),
+        timestamp() / 1000,
+        start_slot,
+        end_slot
+    );
+    match Blockstore::open_with_options(
+        &ledger_path.join(backup_folder),
+        blockstore_options_from_config(config),
+    ) {
+        Ok(backup_blockstore) => {
+            info!("Backing up slots {start_slot} to {end_slot}");
+            let (_, backup_time) = measure!(
+                {
+                    let last_print = AtomicInterval::default();
+                    let mut copied = 0;
+                    let slot_meta_iterator = blockstore.slot_meta_iterator(start_slot)?;
+                    for (slot, _meta) in slot_meta_iterator {
+                        let shreds = blockstore.get_data_shreds_for_slot(slot, 0)?;
+                        copied += shreds.len();
+                        let _ = backup_blockstore.insert_shreds(shreds, None, true);
+
+                        if last_print.should_update(5000) {
+                            info!("Copied slot {slot}, copied {copied} shreds so far");
+                        }
+                    }
+                },
+                "blockstore backup"
+            );
+            info!("done. {backup_time}");
+        }
+        Err(err) => {
+            warn!("Unable to backup shreds with incorrect shred version: {err}");
+        }
+    }
+
+    info!("Purging slots {start_slot} to {end_slot} from blockstore");
+    let (_, purge_time) = measure!(
+        {
+            blockstore.purge_from_next_slots(start_slot, end_slot);
+            blockstore.purge_slots(start_slot, end_slot, PurgeType::Exact);
+        },
+        "blockstore purge"
+    );
+    info!("done. {purge_time}");
+
+    Ok(())
 }
 
 fn initialize_rpc_transaction_history_services(
@@ -2349,22 +2374,18 @@ mod tests {
 
     #[test]
     fn test_backup_and_clear_blockstore() {
-        use std::time::Instant;
         solana_logger::setup();
         use {
             solana_entry::entry,
-            solana_ledger::{blockstore, get_tmp_ledger_path},
+            solana_ledger::{blockstore, get_tmp_ledger_path_auto_delete},
         };
 
         let validator_config = ValidatorConfig::default_for_test();
-        let blockstore_path = get_tmp_ledger_path!();
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
         {
-            let blockstore = Blockstore::open(&blockstore_path).unwrap();
+            let blockstore = Blockstore::open(ledger_path.path()).unwrap();
 
             let entries = entry::create_ticks(1, 0, Hash::default());
-
-            info!("creating shreds");
-            let mut last_print = Instant::now();
             for i in 1..10 {
                 let shreds = blockstore::entries_to_test_shreds(
                     &entries,
@@ -2375,25 +2396,20 @@ mod tests {
                     true,  // merkle_variant
                 );
                 blockstore.insert_shreds(shreds, None, true).unwrap();
-                if last_print.elapsed().as_millis() > 5000 {
-                    info!("inserted {}", i);
-                    last_print = Instant::now();
-                }
             }
-            drop(blockstore);
+        }
 
-            // this purges and compacts all slots greater than or equal to 5
-            backup_and_clear_blockstore(&blockstore_path, &validator_config, 5, 2);
+        // this purges and compacts all slots greater than or equal to 5
+        backup_and_clear_blockstore(ledger_path.path(), &validator_config, 5, 2).unwrap();
 
-            let blockstore = Blockstore::open(&blockstore_path).unwrap();
-            // assert that slots less than 5 aren't affected
-            assert!(blockstore.meta(4).unwrap().unwrap().next_slots.is_empty());
-            for i in 5..10 {
-                assert!(blockstore
-                    .get_data_shreds_for_slot(i, 0)
-                    .unwrap()
-                    .is_empty());
-            }
+        let blockstore = Blockstore::open(ledger_path.path()).unwrap();
+        // assert that slots less than 5 aren't affected
+        assert!(blockstore.meta(4).unwrap().unwrap().next_slots.is_empty());
+        for i in 5..10 {
+            assert!(blockstore
+                .get_data_shreds_for_slot(i, 0)
+                .unwrap()
+                .is_empty());
         }
     }
 
