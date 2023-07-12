@@ -30,6 +30,7 @@ use {
     },
     crossbeam_channel::{bounded, unbounded, Receiver},
     lazy_static::lazy_static,
+    rayon::iter::{IntoParallelIterator, ParallelIterator},
     solana_client::connection_cache::{ConnectionCache, Protocol},
     solana_entry::poh::compute_hash_time_ns,
     solana_geyser_plugin_manager::{
@@ -1993,21 +1994,27 @@ fn backup_and_clear_blockstore(
         blockstore_options_from_config(config),
     ) {
         Ok(backup_blockstore) => {
-            info!("Backing up slots {start_slot} to {end_slot}");
             let (_, backup_time) = measure!(
                 {
+                    let slots: Vec<_> = blockstore
+                        .slot_meta_iterator(start_slot)?
+                        .map(|(slot, _)| slot)
+                        .collect();
+                    let num_slots_copied = AtomicU64::new(0);
+                    let total_num_slots = slots.len();
+                    info!("Backing up {total_num_slots} slots from {start_slot} to {end_slot}");
+
                     let last_print = AtomicInterval::default();
-                    let mut copied = 0;
-                    let slot_meta_iterator = blockstore.slot_meta_iterator(start_slot)?;
-                    for (slot, _meta) in slot_meta_iterator {
-                        let shreds = blockstore.get_data_shreds_for_slot(slot, 0)?;
-                        copied += shreds.len();
-                        let _ = backup_blockstore.insert_shreds(shreds, None, true);
+                    slots.into_par_iter().for_each(|slot| {
+                        let _ = blockstore.get_data_shreds_for_slot(slot, 0).map(|shreds| {
+                            let _ = backup_blockstore.insert_shreds(shreds, None, true);
+                            num_slots_copied.fetch_add(1, Ordering::Relaxed);
+                        });
 
                         if last_print.should_update(5000) {
-                            info!("Copied slot {slot}, copied {copied} shreds so far");
+                            info!("Copied {num_slots_copied:?} / {total_num_slots} slots thus far");
                         }
-                    }
+                    });
                 },
                 "blockstore backup"
             );
