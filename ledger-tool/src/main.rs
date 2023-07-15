@@ -785,18 +785,18 @@ fn analyze_column<
         })
     } else {
         json!({
-        "column":C::NAME,
-        "entries":val_hist.entries(),
-        "key_stats":{
-            "max":a,
-            "total_bytes":0,
-        },
-        "val_stats":{
-            "total_bytes":0,
-        },
-        "row_stats":{
-            "total_bytes":0,
-        },
+            "column":C::NAME,
+            "entries":val_hist.entries(),
+            "key_stats":{
+                "max":a,
+                "total_bytes":0,
+            },
+            "val_stats":{
+                "total_bytes":0,
+            },
+            "row_stats":{
+                "total_bytes":0,
+            },
         })
     };
 
