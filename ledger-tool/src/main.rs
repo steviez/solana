@@ -803,27 +803,27 @@ fn analyze_column<
     println!("{}", serde_json::to_string_pretty(&json_result).unwrap());
 }
 
-fn analyze_storage(database: &Database) {
-    analyze_column::<cf::SlotMeta>(database);
-    analyze_column::<cf::Orphans>(database);
-    analyze_column::<cf::DeadSlots>(database);
-    analyze_column::<cf::DuplicateSlots>(database);
-    analyze_column::<cf::ErasureMeta>(database);
-    analyze_column::<cf::BankHash>(database);
-    analyze_column::<cf::Root>(database);
-    analyze_column::<cf::Index>(database);
-    analyze_column::<cf::ShredData>(database);
-    analyze_column::<cf::ShredCode>(database);
-    analyze_column::<cf::TransactionStatus>(database);
-    analyze_column::<cf::AddressSignatures>(database);
-    analyze_column::<cf::TransactionMemos>(database);
-    analyze_column::<cf::TransactionStatusIndex>(database);
-    analyze_column::<cf::Rewards>(database);
-    analyze_column::<cf::Blocktime>(database);
-    analyze_column::<cf::PerfSamples>(database);
-    analyze_column::<cf::BlockHeight>(database);
-    analyze_column::<cf::ProgramCosts>(database);
-    analyze_column::<cf::OptimisticSlots>(database);
+fn analyze_storage(db: &Database) {
+    analyze_column::<cf::SlotMeta>(db);
+    analyze_column::<cf::Orphans>(db);
+    analyze_column::<cf::DeadSlots>(db);
+    analyze_column::<cf::DuplicateSlots>(db);
+    analyze_column::<cf::ErasureMeta>(db);
+    analyze_column::<cf::BankHash>(db);
+    analyze_column::<cf::Root>(db);
+    analyze_column::<cf::Index>(db);
+    analyze_column::<cf::ShredData>(db);
+    analyze_column::<cf::ShredCode>(db);
+    analyze_column::<cf::TransactionStatus>(db);
+    analyze_column::<cf::AddressSignatures>(db);
+    analyze_column::<cf::TransactionMemos>(db);
+    analyze_column::<cf::TransactionStatusIndex>(db);
+    analyze_column::<cf::Rewards>(db);
+    analyze_column::<cf::Blocktime>(db);
+    analyze_column::<cf::PerfSamples>(db);
+    analyze_column::<cf::BlockHeight>(db);
+    analyze_column::<cf::ProgramCosts>(db);
+    analyze_column::<cf::OptimisticSlots>(db);
 }
 
 fn raw_key_to_slot(key: &[u8], column_name: &str) -> Option<Slot> {
