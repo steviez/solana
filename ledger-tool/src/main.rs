@@ -805,27 +805,26 @@ fn analyze_column<
 }
 
 fn analyze_storage(database: &Database) {
-    use blockstore_db::columns::*;
-    analyze_column::<SlotMeta>(database, "SlotMeta");
-    analyze_column::<Orphans>(database, "Orphans");
-    analyze_column::<DeadSlots>(database, "DeadSlots");
-    analyze_column::<DuplicateSlots>(database, "DuplicateSlots");
-    analyze_column::<ErasureMeta>(database, "ErasureMeta");
-    analyze_column::<BankHash>(database, "BankHash");
-    analyze_column::<Root>(database, "Root");
-    analyze_column::<Index>(database, "Index");
-    analyze_column::<ShredData>(database, "ShredData");
-    analyze_column::<ShredCode>(database, "ShredCode");
-    analyze_column::<TransactionStatus>(database, "TransactionStatus");
-    analyze_column::<AddressSignatures>(database, "AddressSignatures");
-    analyze_column::<TransactionMemos>(database, "TransactionMemos");
-    analyze_column::<TransactionStatusIndex>(database, "TransactionStatusIndex");
-    analyze_column::<Rewards>(database, "Rewards");
-    analyze_column::<Blocktime>(database, "Blocktime");
-    analyze_column::<PerfSamples>(database, "PerfSamples");
-    analyze_column::<BlockHeight>(database, "BlockHeight");
-    analyze_column::<ProgramCosts>(database, "ProgramCosts");
-    analyze_column::<OptimisticSlots>(database, "OptimisticSlots");
+    analyze_column::<cf::SlotMeta>(database, "SlotMeta");
+    analyze_column::<cf::Orphans>(database, "Orphans");
+    analyze_column::<cf::DeadSlots>(database, "DeadSlots");
+    analyze_column::<cf::DuplicateSlots>(database, "DuplicateSlots");
+    analyze_column::<cf::ErasureMeta>(database, "ErasureMeta");
+    analyze_column::<cf::BankHash>(database, "BankHash");
+    analyze_column::<cf::Root>(database, "Root");
+    analyze_column::<cf::Index>(database, "Index");
+    analyze_column::<cf::ShredData>(database, "ShredData");
+    analyze_column::<cf::ShredCode>(database, "ShredCode");
+    analyze_column::<cf::TransactionStatus>(database, "TransactionStatus");
+    analyze_column::<cf::AddressSignatures>(database, "AddressSignatures");
+    analyze_column::<cf::TransactionMemos>(database, "TransactionMemos");
+    analyze_column::<cf::TransactionStatusIndex>(database, "TransactionStatusIndex");
+    analyze_column::<cf::Rewards>(database, "Rewards");
+    analyze_column::<cf::Blocktime>(database, "Blocktime");
+    analyze_column::<cf::PerfSamples>(database, "PerfSamples");
+    analyze_column::<cf::BlockHeight>(database, "BlockHeight");
+    analyze_column::<cf::ProgramCosts>(database, "ProgramCosts");
+    analyze_column::<cf::OptimisticSlots>(database, "OptimisticSlots");
 }
 
 fn raw_key_to_slot(key: &[u8], column_name: &str) -> Option<Slot> {
