@@ -6,6 +6,7 @@ use histogram;
 use serde_json::json;
 use solana_clap_utils::input_validators::is_slot;
 use solana_ledger::{
+    ancestor_iterator::AncestorIterator,
     bank_forks::{BankForks, SnapshotConfig},
     bank_forks_utils,
     blockstore::Blockstore,
@@ -1256,12 +1257,11 @@ fn main() {
             let blockstore = open_blockstore(
                 &ledger_path,
                 AccessType::TryPrimaryThenSecondary,
-                wal_recovery_mode,
             );
             let start_root = if let Some(root) = arg_matches.value_of("start_root") {
                 Slot::from_str(root).expect("Before root must be a number")
             } else {
-                blockstore.max_root()
+                std::u64::MAX
             };
             let max_slots = value_t_or_exit!(arg_matches, "max_slots", u64);
             let end_root = if let Some(root) = arg_matches.value_of("end_root") {
