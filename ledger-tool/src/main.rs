@@ -45,10 +45,12 @@ use {
             BLOCKSTORE_DIRECTORY_ROCKS_FIFO,
         },
         blockstore_processor::ProcessOptions,
+        leader_schedule_utils,
         shred::Shred,
         use_snapshot_archives_at_startup::{self, UseSnapshotArchivesAtStartup},
     },
     solana_measure::{measure, measure::Measure},
+    solana_program_runtime::timings::ExecuteTimings,
     solana_runtime::{
         bank::{bank_hash_details, Bank, RewardCalculationEvent, TotalAccountsStats},
         bank_forks::BankForks,
@@ -64,7 +66,7 @@ use {
     solana_sdk::{
         account::{AccountSharedData, ReadableAccount, WritableAccount},
         account_utils::StateMut,
-        clock::{Epoch, Slot, UnixTimestamp},
+        clock::{Epoch, Slot, UnixTimestamp, MAX_PROCESSING_AGE},
         feature::{self, Feature},
         feature_set::{self, FeatureSet},
         genesis_config::ClusterType,
@@ -77,7 +79,8 @@ use {
         stake::{self, state::StakeStateV2},
         system_program,
         transaction::{
-            MessageHash, SanitizedTransaction, SimpleAddressLoader, VersionedTransaction,
+            self, MessageHash, SanitizedTransaction, SimpleAddressLoader,
+            TransactionVerificationMode, VersionedTransaction,
         },
     },
     solana_stake_program::stake_state::{self, PointValue},
@@ -896,6 +899,87 @@ fn print_blockstore_file_metadata(
     Ok(())
 }
 
+fn process_slot_tx_by_tx(
+    bank_forks: &RwLock<BankForks>,
+    blockstore: &Blockstore,
+    slot: Slot,
+) -> Result<(), String> {
+    let meta = blockstore
+        .meta(slot)
+        .unwrap()
+        .filter(|meta| meta.is_full())
+        .unwrap();
+    let entries = blockstore.get_slot_entries(slot, 0).unwrap();
+
+    let parent_slot = meta.parent_slot.unwrap();
+    let parent_bank = bank_forks.read().unwrap().get(parent_slot).unwrap();
+    let leader_pubkey = leader_schedule_utils::slot_leader_at(slot, &parent_bank).unwrap();
+    let bank = bank_forks.write().unwrap().insert(Bank::new_from_parent(
+        parent_bank,
+        &leader_pubkey,
+        slot,
+    ));
+
+    use solana_entry::entry::{self, EntryType};
+    let verify_transaction = {
+        let bank = bank.clone();
+        move |versioned_tx: VersionedTransaction| -> transaction::Result<SanitizedTransaction> {
+            bank.verify_transaction(versioned_tx, TransactionVerificationMode::FullVerification)
+        }
+    };
+    let verified_entries =
+        entry::verify_transactions(entries, Arc::new(verify_transaction)).unwrap();
+    let (tick_hashes, transactions) = {
+        let mut tick_hashes = vec![];
+        let mut transactions = vec![];
+        verified_entries.into_iter().for_each(|entry| match entry {
+            EntryType::Tick(hash) => {
+                tick_hashes.push(hash);
+            }
+            EntryType::Transactions(entry_transactions) => {
+                transactions.extend(entry_transactions.into_iter());
+            }
+        });
+        (tick_hashes, transactions)
+    };
+
+    let collect_balances = true;
+    let enable_cpi_recording = true;
+    let enable_log_recording = true;
+    let enable_return_data_recording = true;
+    let log_messages_bytes_limit = None;
+
+    transactions
+        .into_iter()
+        .enumerate()
+        .for_each(|(idx, transaction)| {
+            let transaction_slice = &[transaction];
+            let sanitized_transaction = bank.prepare_sanitized_batch(transaction_slice);
+            // The batch is a single transaction so something very wrong if there are lock errors
+            sanitized_transaction
+                .lock_results()
+                .iter()
+                .for_each(|result| assert!(result.is_ok()));
+
+            let (execute_results, balances) = bank.load_execute_and_commit_transactions(
+                &sanitized_transaction,
+                MAX_PROCESSING_AGE,
+                collect_balances,
+                enable_cpi_recording,
+                enable_log_recording,
+                enable_return_data_recording,
+                &mut ExecuteTimings::default(),
+                log_messages_bytes_limit,
+            );
+        });
+
+    tick_hashes.iter().for_each(|hash| bank.register_tick(hash));
+    assert!(bank.is_complete());
+    bank.freeze();
+
+    Ok(())
+}
+
 fn compute_slot_cost(blockstore: &Blockstore, slot: Slot) -> Result<(), String> {
     if blockstore.is_dead(slot) {
         return Err("Dead slot".to_string());
@@ -1673,6 +1757,7 @@ fn main() {
                 Arg::with_name("write_bank_file")
                     .long("write-bank-file")
                     .takes_value(false)
+                    .requires("halt_at_slot")
                     .help("After verifying the ledger, write a file that contains the information \
                         that went into computing the completed bank's bank hash. The file will be \
                         written within <LEDGER_DIR>/bank_hash_details/"),
@@ -2633,6 +2718,13 @@ fn main() {
                     );
                 }
 
+                let write_bank_file = arg_matches.is_present("write_bank_file");
+                let mut halt_at_slot = value_t!(arg_matches, "halt_at_slot", Slot).ok();
+                if write_bank_file {
+                    // Halt before last slot as we'll replay the halt-at-slot specially
+                    halt_at_slot = Some(halt_at_slot.unwrap() - 1);
+                }
+
                 let process_options = ProcessOptions {
                     new_hard_forks: hardforks_of(arg_matches, "hard_forks"),
                     run_verification: !(arg_matches.is_present("skip_poh_verify")
@@ -2640,7 +2732,7 @@ fn main() {
                     on_halt_store_hash_raw_data_for_debug: arg_matches
                         .is_present("halt_at_slot_store_hash_raw_data"),
                     run_final_accounts_hash_calc: arg_matches.is_present("run_final_hash_calc"),
-                    halt_at_slot: value_t!(arg_matches, "halt_at_slot", Slot).ok(),
+                    halt_at_slot,
                     debug_keys,
                     limit_load_slot_count_from_snapshot: value_t!(
                         arg_matches,
@@ -2663,21 +2755,20 @@ fn main() {
                     ..ProcessOptions::default()
                 };
                 let print_accounts_stats = arg_matches.is_present("print_accounts_stats");
-                let write_bank_file = arg_matches.is_present("write_bank_file");
                 let genesis_config = open_genesis_config_by(&ledger_path, arg_matches);
                 info!("genesis hash: {}", genesis_config.hash());
 
-                let blockstore = open_blockstore(
+                let blockstore = Arc::new(open_blockstore(
                     &ledger_path,
                     get_access_type(&process_options),
                     wal_recovery_mode,
                     force_update_to_open,
                     enforce_ulimit_nofile,
-                );
+                ));
                 let (bank_forks, ..) = load_and_process_ledger(
                     arg_matches,
                     &genesis_config,
-                    Arc::new(blockstore),
+                    blockstore.clone(),
                     process_options,
                     snapshot_archive_path,
                     incremental_snapshot_archive_path,
@@ -2691,6 +2782,8 @@ fn main() {
                     working_bank.print_accounts_stats();
                 }
                 if write_bank_file {
+                    let slot = value_t!(arg_matches, "halt_at_slot", Slot).unwrap();
+                    process_slot_tx_by_tx(&bank_forks, &blockstore, slot);
                     let working_bank = bank_forks.read().unwrap().working_bank();
                     let _ = bank_hash_details::write_bank_hash_details_file(&working_bank);
                 }
