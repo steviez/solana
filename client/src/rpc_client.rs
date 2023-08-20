@@ -5,9 +5,9 @@ use crate::{
     rpc_client_request::RpcClientRequest,
     rpc_request::{RpcError, RpcRequest},
     rpc_response::{
-        Response, RpcAccount, RpcBlockhashFeeCalculator, RpcConfirmedBlock, RpcContactInfo,
+        Response, RpcAccount, RpcBlockhashFeeCalculator, RpcContactInfo,
         RpcEpochInfo, RpcFeeCalculator, RpcFeeRateGovernor, RpcIdentity, RpcKeyedAccount,
-        RpcLeaderSchedule, RpcResult, RpcTransactionStatus, RpcVersionInfo, RpcVoteAccountStatus,
+        RpcLeaderSchedule, RpcResult, RpcVersionInfo, RpcVoteAccountStatus,
     },
 };
 use bincode::serialize;
