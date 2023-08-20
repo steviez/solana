@@ -1256,7 +1256,6 @@ fn main() {
         ("repair-roots", Some(arg_matches)) => {
             let blockstore = open_blockstore(
                 &ledger_path,
-                AccessType::TryPrimaryThenSecondary,
             );
             let start_root = if let Some(root) = arg_matches.value_of("start_root") {
                 Slot::from_str(root).expect("Before root must be a number")
