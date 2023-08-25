@@ -904,6 +904,11 @@ fn process_slot_tx_by_tx(
     blockstore: &Blockstore,
     slot: Slot,
 ) -> Result<(), String> {
+    use {
+        solana_accounts_db::{accounts_db::LoadHint, ancestors::Ancestors},
+        solana_entry::entry::{self, EntryType},
+    };
+
     let meta = blockstore
         .meta(slot)
         .unwrap()
@@ -920,7 +925,6 @@ fn process_slot_tx_by_tx(
         slot,
     ));
 
-    use solana_entry::entry::{self, EntryType};
     let verify_transaction = {
         let bank = bank.clone();
         move |versioned_tx: VersionedTransaction| -> transaction::Result<SanitizedTransaction> {
@@ -949,29 +953,53 @@ fn process_slot_tx_by_tx(
     let enable_return_data_recording = true;
     let log_messages_bytes_limit = None;
 
-    transactions
-        .into_iter()
-        .enumerate()
-        .for_each(|(idx, transaction)| {
-            let transaction_slice = &[transaction];
-            let sanitized_transaction = bank.prepare_sanitized_batch(transaction_slice);
-            // The batch is a single transaction so something very wrong if there are lock errors
-            sanitized_transaction
-                .lock_results()
-                .iter()
-                .for_each(|result| assert!(result.is_ok()));
+    let ancestors = Ancestors::from(vec![slot]);
+    let max_root = Some(slot);
+    transactions.into_iter().for_each(|transaction| {
+        let transaction_slice = &[transaction];
 
-            let (execute_results, balances) = bank.load_execute_and_commit_transactions(
-                &sanitized_transaction,
-                MAX_PROCESSING_AGE,
-                collect_balances,
-                enable_cpi_recording,
-                enable_log_recording,
-                enable_return_data_recording,
-                &mut ExecuteTimings::default(),
-                log_messages_bytes_limit,
-            );
-        });
+        let sanitized_transaction = bank.prepare_sanitized_batch(transaction_slice);
+        // The batch is a single transaction so something very wrong if there are lock errors
+        sanitized_transaction
+            .lock_results()
+            .iter()
+            .for_each(|result| assert!(result.is_ok()));
+
+        let (_execute_results, _balances) = bank.load_execute_and_commit_transactions(
+            &sanitized_transaction,
+            MAX_PROCESSING_AGE,
+            collect_balances,
+            enable_cpi_recording,
+            enable_log_recording,
+            enable_return_data_recording,
+            &mut ExecuteTimings::default(),
+            log_messages_bytes_limit,
+        );
+
+        #[derive(Serialize)]
+        struct PubkeyHash {
+            pubkey: String,
+            hash: String,
+        }
+
+        let account_keys = transaction_slice[0].message().account_keys();
+        let pubkeys_hashes: Vec<_> = account_keys
+            .iter()
+            .map(|pubkey| {
+                let hash = bank
+                    .rc
+                    .accounts
+                    .accounts_db
+                    .load_account_hash(&ancestors, pubkey, max_root, LoadHint::FixedMaxRoot)
+                    .unwrap();
+                PubkeyHash {
+                    pubkey: pubkey.to_string(),
+                    hash: hash.to_string(),
+                }
+            })
+            .collect();
+        serde_json::to_writer_pretty(stdout(), &pubkeys_hashes).unwrap();
+    });
 
     tick_hashes.iter().for_each(|hash| bank.register_tick(hash));
     assert!(bank.is_complete());
@@ -2783,7 +2811,7 @@ fn main() {
                 }
                 if write_bank_file {
                     let slot = value_t!(arg_matches, "halt_at_slot", Slot).unwrap();
-                    process_slot_tx_by_tx(&bank_forks, &blockstore, slot);
+                    process_slot_tx_by_tx(&bank_forks, &blockstore, slot).unwrap();
                     let working_bank = bank_forks.read().unwrap().working_bank();
                     let _ = bank_hash_details::write_bank_hash_details_file(&working_bank);
                 }
