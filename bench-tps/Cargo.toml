@@ -19,14 +19,14 @@ solana-core = { path = "../core", version = "1.0.10" }
 solana-genesis = { path = "../genesis", version = "1.0.10" }
 solana-client = { path = "../client", version = "1.0.10" }
 solana-faucet = { path = "../faucet", version = "1.0.10" }
-solana-librapay = { path = "../programs/librapay", version = "1.0.10", optional = true }
+#solana-librapay = { path = "../programs/librapay", version = "1.0.9", optional = true }
 solana-logger = { path = "../logger", version = "1.0.10" }
 solana-metrics = { path = "../metrics", version = "1.0.10" }
 solana-measure = { path = "../measure", version = "1.0.10" }
 solana-net-utils = { path = "../net-utils", version = "1.0.10" }
 solana-runtime = { path = "../runtime", version = "1.0.10" }
 solana-sdk = { path = "../sdk", version = "1.0.10" }
-solana-move-loader-program = { path = "../programs/move_loader", version = "1.0.10", optional = true }
+#solana-move-loader-program = { path = "../programs/move_loader", version = "1.0.10", optional = true }
 
 [dev-dependencies]
 serial_test = "0.3.2"
@@ -34,4 +34,4 @@ serial_test_derive = "0.4.0"
 solana-local-cluster = { path = "../local-cluster", version = "1.0.10" }
 
 [features]
-move = ["solana-librapay", "solana-move-loader-program"]
+#move = ["solana-librapay", "solana-move-loader-program"]
