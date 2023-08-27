@@ -8,8 +8,8 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_transaction_status::{
-    ConfirmedBlock, ConfirmedTransaction, EncodedTransaction, Rewards, TransactionStatus,
-    TransactionWithStatusMeta, UiTransactionEncoding, UiTransactionStatusMeta,
+    ConfirmedBlock, ConfirmedTransaction, EncodedTransaction, Rewards, TransactionStatus, TransactionStatusMeta,
+    TransactionWithStatusMeta, TransactionEncoding,
 };
 use std::{
     collections::HashMap,
@@ -91,7 +91,7 @@ struct StoredConfirmedBlock {
 }
 
 impl StoredConfirmedBlock {
-    fn into_confirmed_block(self, encoding: UiTransactionEncoding) -> ConfirmedBlock {
+    fn into_confirmed_block(self, encoding: TransactionEncoding) -> ConfirmedBlock {
         let StoredConfirmedBlock {
             previous_blockhash,
             blockhash,
@@ -110,7 +110,6 @@ impl StoredConfirmedBlock {
                 .map(|transaction| transaction.into_transaction_with_status_meta(encoding))
                 .collect(),
             rewards,
-            block_time,
         }
     }
 }
@@ -125,8 +124,8 @@ impl TryFrom<ConfirmedBlock> for StoredConfirmedBlock {
             parent_slot,
             transactions,
             rewards,
-            block_time,
         } = confirmed_block;
+        let block_time = None;
 
         let mut encoded_transactions = vec![];
         for transaction in transactions.into_iter() {
@@ -153,7 +152,7 @@ struct StoredConfirmedBlockTransaction {
 impl StoredConfirmedBlockTransaction {
     fn into_transaction_with_status_meta(
         self,
-        encoding: UiTransactionEncoding,
+        encoding: TransactionEncoding,
     ) -> TransactionWithStatusMeta {
         let StoredConfirmedBlockTransaction { transaction, meta } = self;
         TransactionWithStatusMeta {
@@ -186,7 +185,7 @@ struct StoredConfirmedBlockTransactionStatusMeta {
     post_balances: Vec<u64>,
 }
 
-impl From<StoredConfirmedBlockTransactionStatusMeta> for UiTransactionStatusMeta {
+impl From<StoredConfirmedBlockTransactionStatusMeta> for TransactionStatusMeta {
     fn from(value: StoredConfirmedBlockTransactionStatusMeta) -> Self {
         let StoredConfirmedBlockTransactionStatusMeta {
             err,
@@ -194,12 +193,13 @@ impl From<StoredConfirmedBlockTransactionStatusMeta> for UiTransactionStatusMeta
             pre_balances,
             post_balances,
         } = value;
+
         let status = match &err {
             None => Ok(()),
             Some(err) => Err(err.clone()),
         };
+
         Self {
-            err,
             status,
             fee,
             pre_balances,
@@ -208,15 +208,16 @@ impl From<StoredConfirmedBlockTransactionStatusMeta> for UiTransactionStatusMeta
     }
 }
 
-impl From<UiTransactionStatusMeta> for StoredConfirmedBlockTransactionStatusMeta {
-    fn from(value: UiTransactionStatusMeta) -> Self {
-        let UiTransactionStatusMeta {
-            err,
+impl From<TransactionStatusMeta> for StoredConfirmedBlockTransactionStatusMeta {
+    fn from(value: TransactionStatusMeta) -> Self {
+        let TransactionStatusMeta {
+            status,
             fee,
             pre_balances,
             post_balances,
-            ..
         } = value;
+
+        let err = status.err();
         Self {
             err,
             fee,
@@ -244,9 +245,7 @@ impl From<TransactionInfo> for TransactionStatus {
         };
         Self {
             slot,
-            confirmations: None,
             status,
-            err,
         }
     }
 }
@@ -298,7 +297,7 @@ impl LedgerStorage {
     pub async fn get_confirmed_block(
         &self,
         slot: Slot,
-        encoding: UiTransactionEncoding,
+        encoding: TransactionEncoding,
     ) -> Result<ConfirmedBlock> {
         let mut bigtable = self.connection.client();
         let block = bigtable
@@ -319,7 +318,7 @@ impl LedgerStorage {
     pub async fn get_confirmed_transaction(
         &self,
         signature: &Signature,
-        encoding: UiTransactionEncoding,
+        encoding: TransactionEncoding,
     ) -> Result<Option<ConfirmedTransaction>> {
         let mut bigtable = self.connection.client();
 
@@ -371,7 +370,7 @@ impl LedgerStorage {
 
         // Figure out where to start listing from based on `before_signature`
         let (first_slot, mut first_transaction_index) = match before_signature {
-            None => (Slot::MAX, 0),
+            None => (std::u64::MAX, 0),
             Some(before_signature) => {
                 let TransactionInfo { slot, index, .. } = bigtable
                     .get_bincode_cell("tx", before_signature.to_string())
@@ -445,7 +444,7 @@ impl LedgerStorage {
             let err = transaction_with_meta
                 .meta
                 .as_ref()
-                .and_then(|meta| meta.err.clone());
+                .and_then(|meta| meta.status.clone().err());
             let index = index as u32;
             let transaction = transaction_with_meta
                 .transaction

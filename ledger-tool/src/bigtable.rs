@@ -5,11 +5,11 @@ use solana_clap_utils::{
     input_parsers::pubkey_of,
     input_validators::{is_slot, is_valid_pubkey},
 };
-use solana_cli::display::println_transaction;
-use solana_ledger::{blockstore::Blockstore, blockstore_db::AccessType};
+// use solana_cli::display::println_transaction;
+use solana_ledger::{blockstore::Blockstore};
 use solana_measure::measure::Measure;
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
-use solana_transaction_status::UiTransactionEncoding;
+use solana_transaction_status::TransactionEncoding;
 use std::{collections::HashSet, path::Path, process::exit, result::Result, time::Duration};
 use tokio::time::delay_for;
 
@@ -134,7 +134,7 @@ async fn upload(
                 for (i, slot) in blocks_to_upload.iter().enumerate() {
                     let _ = match blockstore.get_confirmed_block(
                         *slot,
-                        Some(solana_transaction_status::UiTransactionEncoding::Binary),
+                        Some(solana_transaction_status::TransactionEncoding::Binary),
                     ) {
                         Ok(confirmed_block) => sender.send((*slot, Some(confirmed_block))),
                         Err(err) => {
@@ -162,7 +162,7 @@ async fn upload(
         )
     };
 
-    let mut failures = 0;
+    let mut failures: u64 = 0;
     use futures::stream::StreamExt;
 
     let mut stream =
@@ -231,26 +231,31 @@ async fn block(slot: Slot) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|err| format!("Failed to connect to storage: {:?}", err))?;
 
     let block = bigtable
-        .get_confirmed_block(slot, UiTransactionEncoding::Binary)
+        .get_confirmed_block(slot, TransactionEncoding::Binary)
         .await?;
 
     println!("Slot: {}", slot);
     println!("Parent Slot: {}", block.parent_slot);
     println!("Blockhash: {}", block.blockhash);
     println!("Previous Blockhash: {}", block.previous_blockhash);
+    /*
+    // This is known to be none
     if block.block_time.is_some() {
         println!("Block Time: {:?}", block.block_time);
     }
+    */
     if !block.rewards.is_empty() {
         println!("Rewards: {:?}", block.rewards);
     }
     for (index, transaction_with_meta) in block.transactions.iter().enumerate() {
         println!("Transaction {}:", index);
+        /*
         println_transaction(
             &transaction_with_meta.transaction.decode().unwrap(),
             &transaction_with_meta.meta,
             "  ",
         );
+        */
     }
     Ok(())
 }
@@ -276,7 +281,7 @@ async fn confirm(signature: &Signature, verbose: bool) -> Result<(), Box<dyn std
 
     if verbose {
         match bigtable
-            .get_confirmed_transaction(signature, UiTransactionEncoding::Binary)
+            .get_confirmed_transaction(signature, TransactionEncoding::Binary)
             .await
         {
             Ok(Some(confirmed_transaction)) => {
@@ -284,6 +289,7 @@ async fn confirm(signature: &Signature, verbose: bool) -> Result<(), Box<dyn std
                     "\nTransaction executed in slot {}:",
                     confirmed_transaction.slot
                 );
+                /*
                 println_transaction(
                     &confirmed_transaction
                         .transaction
@@ -293,6 +299,7 @@ async fn confirm(signature: &Signature, verbose: bool) -> Result<(), Box<dyn std
                     &confirmed_transaction.transaction.meta,
                     "  ",
                 );
+                */
             }
             Ok(None) => println!("Confirmed transaction details not available"),
             Err(err) => println!("Unable to get confirmed transaction details: {}", err),
@@ -493,7 +500,7 @@ pub fn bigtable_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) {
             let ending_slot = value_t!(arg_matches, "ending_slot", Slot).ok();
             let allow_missing_metadata = arg_matches.is_present("allow_missing_metadata");
             let blockstore =
-                crate::open_blockstore(&ledger_path, AccessType::TryPrimaryThenSecondary);
+                crate::open_blockstore(&ledger_path);
 
             runtime.block_on(upload(
                 blockstore,

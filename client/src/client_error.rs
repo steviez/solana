@@ -52,7 +52,7 @@ impl Into<TransportError> for ClientErrorKind {
 pub struct ClientError {
     command: Option<&'static str>,
     #[source]
-    #[error(transparent)]
+    // #[error(transparent)]
     kind: ClientErrorKind,
 }
 

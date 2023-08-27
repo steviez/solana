@@ -435,7 +435,7 @@ impl RpcClient {
 
             // Re-sign any failed transactions with a new blockhash and retry
             let (blockhash, _fee_calculator) =
-                self.get_new_blockhash(&transactions_signatures[0].0.message().recent_blockhash)?;
+                self.get_new_blockhash(&transactions_signatures[0].0.message().recent_blockhash).unwrap();
             transactions = vec![];
             for (mut transaction, _) in transactions_signatures.into_iter() {
                 transaction.try_sign(signer_keys, blockhash)?;
@@ -467,11 +467,11 @@ impl RpcClient {
                 json!([pubkey.to_string()]),
                 retries,
             )
-            .map_err(|err| err.into_with_command("RetryGetBalance"))?;
+            .map_err(|err| err.into_with_command("RetryGetBalance")).unwrap();
 
         Ok(Some(
             serde_json::from_value::<Response<u64>>(balance_json)
-                .map_err(|err| ClientError::new_with_command(err.into(), "RetryGetBalance"))?
+                .map_err(|err| ClientError::new_with_command(err.into(), "RetryGetBalance")).unwrap()
                 .value,
         ))
     }
@@ -513,7 +513,7 @@ impl RpcClient {
             })
             .map_err(|err| {
                 Into::<ClientError>::into(RpcError::ForUser(format!(
-                    "AccountNotFound: pubkey={}: {}",
+                    "AccountNotFound: pubkey={}: {:?}",
                     pubkey, err
                 )))
             })?
