@@ -66,7 +66,7 @@ impl Committer {
         loaded_transactions: &mut [TransactionLoadResult],
         execution_results: Vec<TransactionExecutionResult>,
         starting_transaction_index: Option<usize>,
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         pre_balance_info: &mut PreBalanceInfo,
         execute_and_commit_timings: &mut LeaderExecuteAndCommitTimings,
         signature_count: u64,
@@ -135,7 +135,7 @@ impl Committer {
     fn collect_balances_and_send_status_batch(
         &self,
         tx_results: TransactionResults,
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         batch: &TransactionBatch,
         pre_balance_info: &mut PreBalanceInfo,
         starting_transaction_index: Option<usize>,

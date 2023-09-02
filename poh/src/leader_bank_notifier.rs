@@ -39,14 +39,14 @@ impl LeaderBankNotifier {
     /// Set the status to `InProgress` and notify any waiting threads.
     /// Panics if the status is not `StandBy` - cannot have multiple
     /// leader banks in progress.
-    pub(crate) fn set_in_progress(&self, bank: &Arc<Bank>) {
+    pub(crate) fn set_in_progress(&self, bank: &solana_runtime::bank_forks::TrackedArcBank) {
         let mut state = self.state.lock().unwrap();
         assert_eq!(state.status, Status::StandBy);
 
         *state = SlotAndBankWithStatus {
             status: Status::InProgress,
             slot: Some(bank.slot()),
-            bank: Arc::downgrade(bank),
+            bank: Arc::downgrade(&bank.naughty_naughty()),
         };
         drop(state);
 

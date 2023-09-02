@@ -257,7 +257,7 @@ fn load_program_and_advance_slot(
     loader_id: &Pubkey,
     payer_keypair: &Keypair,
     name: &str,
-) -> (Arc<Bank>, Pubkey) {
+) -> (solana_runtime::bank_forks::TrackedArcBank, Pubkey) {
     let pubkey = load_program(bank_client, loader_id, payer_keypair, name);
     (
         bank_client
@@ -2632,7 +2632,7 @@ fn test_program_upgradeable_locks() {
         payer_keypair: &Keypair,
         buffer_keypair: &Keypair,
         program_keypair: &Keypair,
-    ) -> (Arc<Bank>, Transaction, Transaction) {
+    ) -> (solana_runtime::bank_forks::TrackedArcBank, Transaction, Transaction) {
         solana_logger::setup();
 
         let GenesisConfigInfo {

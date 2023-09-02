@@ -810,7 +810,7 @@ impl ProgramTest {
         bank.set_capitalization();
         // Advance beyond slot 0 for a slightly more realistic test environment
         let bank = {
-            let bank = Arc::new(bank);
+            let bank = solana_runtime::bank_forks::TrackedArcBank::new_from_arc_bank(Arc::new(bank));
             bank.fill_bank_with_ticks_for_tests();
             let bank = Bank::new_from_parent(&bank, bank.collector_id(), bank.slot() + 1);
             debug!("Bank slot: {}", bank.slot());

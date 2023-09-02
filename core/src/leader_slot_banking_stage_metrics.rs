@@ -851,9 +851,9 @@ mod tests {
     };
 
     struct TestSlotBoundaryComponents {
-        first_bank: Arc<Bank>,
+        first_bank: solana_runtime::bank_forks::TrackedArcBank,
         first_poh_recorder_bank: BankStart,
-        next_bank: Arc<Bank>,
+        next_bank: solana_runtime::bank_forks::TrackedArcBank,
         next_poh_recorder_bank: BankStart,
         leader_slot_metrics_tracker: LeaderSlotMetricsTracker,
     }

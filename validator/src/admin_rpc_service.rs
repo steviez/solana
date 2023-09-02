@@ -903,7 +903,7 @@ mod tests {
             }
         }
 
-        fn root_bank(&self) -> Arc<Bank> {
+        fn root_bank(&self) -> solana_runtime::bank_forks::TrackedArcBank {
             self.bank_forks.read().unwrap().root_bank()
         }
     }

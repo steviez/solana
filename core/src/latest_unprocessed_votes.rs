@@ -116,7 +116,7 @@ impl LatestValidatorVotePacket {
 // This requires updating dependencies of ed25519-dalek as rand_core is not compatible cross
 // version https://github.com/dalek-cryptography/ed25519-dalek/pull/214
 pub(crate) fn weighted_random_order_by_stake<'a>(
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     pubkeys: impl Iterator<Item = &'a Pubkey>,
 ) -> impl Iterator<Item = Pubkey> {
     // Efraimidis and Spirakis algo for weighted random sample without replacement
@@ -259,7 +259,7 @@ impl LatestUnprocessedVotes {
     /// Votes from validators with 0 stakes are ignored
     pub fn get_and_insert_forwardable_packets(
         &self,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         forward_packet_batches_by_accounts: &mut ForwardPacketBatchesByAccounts,
     ) -> usize {
         let mut continue_forwarding = true;
@@ -308,7 +308,7 @@ impl LatestUnprocessedVotes {
     }
 
     /// Drains all votes yet to be processed sorted by a weighted random ordering by stake
-    pub fn drain_unprocessed(&self, bank: Arc<Bank>) -> Vec<Arc<ImmutableDeserializedPacket>> {
+    pub fn drain_unprocessed(&self, bank: solana_runtime::bank_forks::TrackedArcBank) -> Vec<Arc<ImmutableDeserializedPacket>> {
         let pubkeys_by_stake = weighted_random_order_by_stake(
             &bank,
             self.latest_votes_per_pubkey.read().unwrap().keys(),

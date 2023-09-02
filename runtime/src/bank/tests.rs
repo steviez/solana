@@ -379,7 +379,7 @@ fn create_simple_test_bank(lamports: u64) -> Bank {
     Bank::new_for_tests(&genesis_config)
 }
 
-fn create_simple_test_arc_bank(lamports: u64) -> Arc<Bank> {
+fn create_simple_test_arc_bank(lamports: u64) -> crate::bank_forks::TrackedArcBank {
     Arc::new(create_simple_test_bank(lamports))
 }
 
@@ -718,7 +718,7 @@ fn store_accounts_for_rent_test(
     }
 }
 
-fn create_child_bank_for_rent_test(root_bank: &Arc<Bank>, genesis_config: &GenesisConfig) -> Bank {
+fn create_child_bank_for_rent_test(root_bank: &crate::bank_forks::TrackedArcBank, genesis_config: &GenesisConfig) -> Bank {
     let mut bank = Bank::new_from_parent(
         root_bank,
         &Pubkey::default(),
@@ -2009,7 +2009,7 @@ fn test_rent_eager_collect_rent_in_partition() {
     );
 }
 
-fn new_from_parent_next_epoch(parent: &Arc<Bank>, epochs: Epoch) -> Bank {
+fn new_from_parent_next_epoch(parent: &crate::bank_forks::TrackedArcBank, epochs: Epoch) -> Bank {
     let mut slot = parent.slot();
     let mut epoch = parent.epoch();
     for _ in 0..epochs {
@@ -3532,7 +3532,7 @@ fn test_bank_pay_to_self() {
         .unwrap();
 }
 
-fn new_from_parent(parent: &Arc<Bank>) -> Bank {
+fn new_from_parent(parent: &crate::bank_forks::TrackedArcBank) -> Bank {
     Bank::new_from_parent(parent, &Pubkey::default(), parent.slot() + 1)
 }
 
@@ -5120,7 +5120,7 @@ fn get_nonce_blockhash(bank: &Bank, nonce_pubkey: &Pubkey) -> Option<Hash> {
 }
 
 fn nonce_setup(
-    bank: &mut Arc<Bank>,
+    bank: &crate::bank_forks::TrackedArcBank,
     mint_keypair: &Keypair,
     custodian_lamports: u64,
     nonce_lamports: u64,
@@ -5158,7 +5158,7 @@ fn setup_nonce_with_bank<F>(
     nonce_lamports: u64,
     nonce_authority: Option<Pubkey>,
     feature_set: FeatureSet,
-) -> Result<(Arc<Bank>, Keypair, Keypair, Keypair)>
+) -> Result<(crate::bank_forks::TrackedArcBank, Keypair, Keypair, Keypair)>
 where
     F: FnMut(&mut GenesisConfig),
 {
@@ -8476,8 +8476,8 @@ fn test_store_scan_consistency<F: 'static>(
     acceptable_scan_results: AcceptableScanResults,
 ) where
     F: Fn(
-            Arc<Bank>,
-            crossbeam_channel::Sender<Arc<Bank>>,
+            crate::bank_forks::TrackedArcBank,
+            crossbeam_channel::Sender<crate::bank_forks::TrackedArcBank>,
             crossbeam_channel::Receiver<BankId>,
             Arc<HashSet<Pubkey>>,
             Pubkey,
@@ -8527,8 +8527,8 @@ fn test_store_scan_consistency<F: 'static>(
 
     // Channel over which the bank to scan is sent
     let (bank_to_scan_sender, bank_to_scan_receiver): (
-        crossbeam_channel::Sender<Arc<Bank>>,
-        crossbeam_channel::Receiver<Arc<Bank>>,
+        crossbeam_channel::Sender<crate::bank_forks::TrackedArcBank>,
+        crossbeam_channel::Receiver<crate::bank_forks::TrackedArcBank>,
     ) = bounded(1);
 
     let (scan_finished_sender, scan_finished_receiver): (
@@ -8784,13 +8784,13 @@ fn test_store_scan_consistency_root() {
 }
 
 fn setup_banks_on_fork_to_remove(
-    bank0: Arc<Bank>,
+    bank0: crate::bank_forks::TrackedArcBank,
     pubkeys_to_modify: Arc<HashSet<Pubkey>>,
     program_id: &Pubkey,
     starting_lamports: u64,
     num_banks_on_fork: usize,
     step_size: usize,
-) -> (Arc<Bank>, Vec<(Slot, BankId)>, Ancestors) {
+) -> (crate::bank_forks::TrackedArcBank, Vec<(Slot, BankId)>, Ancestors) {
     // Need at least 2 keys to create inconsistency in account balances when deleting
     // slots
     assert!(pubkeys_to_modify.len() > 1);

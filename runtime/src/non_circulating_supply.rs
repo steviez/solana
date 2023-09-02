@@ -18,7 +18,7 @@ pub struct NonCirculatingSupply {
     pub accounts: Vec<Pubkey>,
 }
 
-pub fn calculate_non_circulating_supply(bank: &Arc<Bank>) -> ScanResult<NonCirculatingSupply> {
+pub fn calculate_non_circulating_supply(bank: &crate::bank_forks::TrackedArcBank) -> ScanResult<NonCirculatingSupply> {
     debug!("Updating Bank supply, epoch: {}", bank.epoch());
     let mut non_circulating_accounts_set: HashSet<Pubkey> = HashSet::new();
 
@@ -230,8 +230,10 @@ mod tests {
         std::{collections::BTreeMap, sync::Arc},
     };
 
-    fn new_from_parent(parent: &Arc<Bank>) -> Bank {
-        Bank::new_from_parent(parent, &Pubkey::default(), parent.slot() + 1)
+    fn new_from_parent(parent: &crate::bank_forks::TrackedArcBank) -> Bank {
+        let slot = parent.slot() + 1;
+        let collector_id = Pubkey::default();
+        Bank::new_from_parent(parent, &collector_id, slot)
     }
 
     #[test]

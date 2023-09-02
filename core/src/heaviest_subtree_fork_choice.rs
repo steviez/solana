@@ -221,7 +221,7 @@ impl HeaviestSubtreeForkChoice {
 
     // Given a root and a list of `frozen_banks` sorted smallest to greatest by slot,
     // return a new HeaviestSubtreeForkChoice
-    pub fn new_from_frozen_banks(root: SlotHashKey, frozen_banks: &[Arc<Bank>]) -> Self {
+    pub fn new_from_frozen_banks(root: SlotHashKey, frozen_banks: &[solana_runtime::bank_forks::TrackedArcBank]) -> Self {
         let mut heaviest_subtree_fork_choice = HeaviestSubtreeForkChoice::new(root);
         let mut prev_slot = root.0;
         for bank in frozen_banks.iter() {
@@ -1113,12 +1113,12 @@ impl ForkChoice for HeaviestSubtreeForkChoice {
     // switching proof to vote for)
     fn select_forks(
         &self,
-        _frozen_banks: &[Arc<Bank>],
+        _frozen_banks: &[solana_runtime::bank_forks::TrackedArcBank],
         tower: &Tower,
         _progress: &ProgressMap,
         _ancestors: &HashMap<u64, HashSet<u64>>,
         bank_forks: &RwLock<BankForks>,
-    ) -> (Arc<Bank>, Option<Arc<Bank>>) {
+    ) -> (solana_runtime::bank_forks::TrackedArcBank, Option<solana_runtime::bank_forks::TrackedArcBank>) {
         let r_bank_forks = bank_forks.read().unwrap();
 
         // BankForks should only contain one valid version of this slot

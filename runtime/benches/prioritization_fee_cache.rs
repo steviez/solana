@@ -63,7 +63,7 @@ fn bench_process_transactions_single_slot(bencher: &mut Bencher) {
     });
 }
 
-fn process_transactions_multiple_slots(banks: &[Arc<Bank>], num_slots: usize, num_threads: usize) {
+fn process_transactions_multiple_slots(banks: &[solana_runtime::bank_forks::TrackedArcBank], num_slots: usize, num_threads: usize) {
     let prioritization_fee_cache = Arc::new(PrioritizationFeeCache::default());
 
     let pool = rayon::ThreadPoolBuilder::new()

@@ -121,6 +121,7 @@ impl Tracker {
 }
 
 /// Wrapper over Arc<Bank> to track Arc handles and find stranded references
+#[derive(Debug)]
 pub struct TrackedArcBank {
     /// Underlying bank
     bank: Arc<Bank>,
@@ -135,6 +136,12 @@ impl TrackedArcBank {
         BANK_TRACKER.lock().unwrap().maybe_register(slot, id);
 
         Self { bank, id }
+    }
+
+    /// Bail out method to get the underlying Arc<Bank>
+    pub fn naughty_naughty(&self) -> Arc<Bank> {
+        warn!("Yielding an untracked Bank from a tracked bank: {}", self.id);
+        self.bank.clone()
     }
 }
 
@@ -227,11 +234,11 @@ impl BankForks {
         self.descendants.clone()
     }
 
-    pub fn frozen_banks(&self) -> HashMap<Slot, Arc<Bank>> {
+    pub fn frozen_banks(&self) -> HashMap<Slot, TrackedArcBank> {
         self.banks
             .iter()
             .filter(|(_, b)| b.is_frozen())
-            .map(|(k, b)| (*k, b.clone()))
+            .map(|(k, b)| (*k, TrackedArcBank::new_from_arc_bank(b.clone())))
             .collect()
     }
 
@@ -243,14 +250,14 @@ impl BankForks {
             .collect()
     }
 
-    pub fn get(&self, bank_slot: Slot) -> Option<Arc<Bank>> {
-        self.banks.get(&bank_slot).cloned()
+    pub fn get(&self, bank_slot: Slot) -> Option<TrackedArcBank> {
+        self.banks.get(&bank_slot).cloned().map(TrackedArcBank::new_from_arc_bank)
     }
 
     pub fn get_with_checked_hash(
         &self,
         (bank_slot, expected_hash): (Slot, Hash),
-    ) -> Option<Arc<Bank>> {
+    ) -> Option<TrackedArcBank> {
         let maybe_bank = self.get(bank_slot);
         if let Some(bank) = &maybe_bank {
             assert_eq!(bank.hash(), expected_hash);
@@ -262,8 +269,8 @@ impl BankForks {
         self.get(slot).map(|bank| bank.hash())
     }
 
-    pub fn root_bank(&self) -> Arc<Bank> {
-        self[self.root()].clone()
+    pub fn root_bank(&self) -> TrackedArcBank {
+        TrackedArcBank::new_from_arc_bank(self[self.root()].clone())
     }
 
     pub fn new_from_banks(initial_forks: &[Arc<Bank>], root: Slot) -> Self {
@@ -271,10 +278,12 @@ impl BankForks {
 
         // Iterate through the heads of all the different forks
         for bank in initial_forks {
+            BANK_TRACKER.lock().unwrap().register_tracked_slot(bank.slot());
+
             banks.insert(bank.slot(), bank.clone());
             let parents = bank.parents();
             for parent in parents {
-                if banks.insert(parent.slot(), parent.clone()).is_some() {
+                if banks.insert(parent.slot(), parent.naughty_naughty()).is_some() {
                     // All ancestors have already been inserted by another fork
                     break;
                 }
@@ -299,7 +308,7 @@ impl BankForks {
         }
     }
 
-    pub fn insert(&mut self, mut bank: Bank) -> Arc<Bank> {
+    pub fn insert(&mut self, mut bank: Bank) -> TrackedArcBank {
         bank.check_program_modification_slot =
             self.root.load(Ordering::Relaxed) < self.highest_slot_at_startup;
 
@@ -311,15 +320,15 @@ impl BankForks {
         for parent in bank.proper_ancestors() {
             self.descendants.entry(parent).or_default().insert(slot);
         }
-        bank
+        TrackedArcBank::new_from_arc_bank(bank)
     }
 
-    pub fn insert_from_ledger(&mut self, bank: Bank) -> Arc<Bank> {
+    pub fn insert_from_ledger(&mut self, bank: Bank) -> TrackedArcBank {
         self.highest_slot_at_startup = std::cmp::max(self.highest_slot_at_startup, bank.slot());
         self.insert(bank)
     }
 
-    pub fn remove(&mut self, slot: Slot) -> Option<Arc<Bank>> {
+    pub fn remove(&mut self, slot: Slot) -> Option<TrackedArcBank> {
         let bank = self.banks.remove(&slot)?;
         for parent in bank.proper_ancestors() {
             let mut entry = match self.descendants.entry(parent) {
@@ -338,15 +347,15 @@ impl BankForks {
         if entry.get().is_empty() {
             entry.remove_entry();
         }
-        Some(bank)
+        Some(TrackedArcBank::new_from_arc_bank(bank))
     }
 
     pub fn highest_slot(&self) -> Slot {
         self.banks.values().map(|bank| bank.slot()).max().unwrap()
     }
 
-    pub fn working_bank(&self) -> Arc<Bank> {
-        self[self.highest_slot()].clone()
+    pub fn working_bank(&self) -> TrackedArcBank {
+        TrackedArcBank::new_from_arc_bank(self[self.highest_slot()].clone())
     }
 
     fn do_set_root_return_metrics(
@@ -354,7 +363,7 @@ impl BankForks {
         root: Slot,
         accounts_background_request_sender: &AbsRequestSender,
         highest_super_majority_root: Option<Slot>,
-    ) -> (Vec<Arc<Bank>>, SetRootMetrics) {
+    ) -> (Vec<TrackedArcBank>, SetRootMetrics) {
         let old_epoch = self.root_bank().epoch();
         // To support `RootBankCache` (via `ReadOnlyAtomicSlot`) accessing `root` *without* locking
         // BankForks first *and* from a different thread, this store *must* be at least Release to
@@ -362,8 +371,7 @@ impl BankForks {
         self.root.store(root, Ordering::Release);
 
         let root_bank = self
-            .banks
-            .get(&root)
+            .get(root)
             .expect("root bank didn't exist in bank_forks");
         let new_epoch = root_bank.epoch();
         if old_epoch != new_epoch {
@@ -389,7 +397,7 @@ impl BankForks {
             .unwrap_or(0);
         // Calculate the accounts hash at a fixed interval
         let mut is_root_bank_squashed = false;
-        let mut banks = vec![root_bank];
+        let mut banks = vec![&root_bank];
         let parents = root_bank.parents();
         banks.extend(parents.iter());
         let total_parent_banks = banks.len();
@@ -404,7 +412,7 @@ impl BankForks {
         // `.find()`.
         let eah_banks: Vec<_> = banks
             .iter()
-            .filter(|&&bank| self.should_request_epoch_accounts_hash(bank))
+            .filter(|&bank| self.should_request_epoch_accounts_hash(&bank))
             .collect();
         assert!(
             eah_banks.len() <= 1,
@@ -430,7 +438,7 @@ impl BankForks {
                 .set_in_flight(eah_bank.slot());
             accounts_background_request_sender
                 .send_snapshot_request(SnapshotRequest {
-                    snapshot_root_bank: Arc::clone(eah_bank),
+                    snapshot_root_bank: eah_bank.clone().clone().clone(),
                     status_cache_slot_deltas: Vec::default(),
                     request_type: SnapshotRequestType::EpochAccountsHash,
                     enqueued: Instant::now(),
@@ -464,9 +472,10 @@ impl BankForks {
                     // `set_root()` is called before the snapshots package can be generated
                     let status_cache_slot_deltas =
                         bank.status_cache.read().unwrap().root_slot_deltas();
+
                     if let Err(e) =
                         accounts_background_request_sender.send_snapshot_request(SnapshotRequest {
-                            snapshot_root_bank: Arc::clone(bank),
+                            snapshot_root_bank: bank.clone().clone(),
                             status_cache_slot_deltas,
                             request_type: SnapshotRequestType::Snapshot,
                             enqueued: Instant::now(),
@@ -524,7 +533,7 @@ impl BankForks {
         root: Slot,
         accounts_background_request_sender: &AbsRequestSender,
         highest_super_majority_root: Option<Slot>,
-    ) -> Vec<Arc<Bank>> {
+    ) -> Vec<TrackedArcBank> {
         let program_cache_prune_start = Instant::now();
         let root_bank = self
             .banks
@@ -694,7 +703,7 @@ impl BankForks {
         &mut self,
         root: Slot,
         highest_super_majority_root: Option<Slot>,
-    ) -> (Vec<Arc<Bank>>, u64, u64) {
+    ) -> (Vec<TrackedArcBank>, u64, u64) {
         // Clippy doesn't like separating the two collects below,
         // but we want to collect timing separately, and the 2nd requires
         // a unique borrow to self which is already borrowed by self.banks

@@ -33,7 +33,7 @@ pub struct VerifiedVoteMetadata {
 }
 
 pub struct ValidatorGossipVotesIterator<'a> {
-    my_leader_bank: Arc<Bank>,
+    my_leader_bank: solana_runtime::bank_forks::TrackedArcBank,
     slot_hashes: SlotHashes,
     verified_vote_packets: &'a VerifiedVotePackets,
     vote_account_keys: Vec<Pubkey>,
@@ -42,7 +42,7 @@ pub struct ValidatorGossipVotesIterator<'a> {
 
 impl<'a> ValidatorGossipVotesIterator<'a> {
     pub fn new(
-        my_leader_bank: Arc<Bank>,
+        my_leader_bank: solana_runtime::bank_forks::TrackedArcBank,
         verified_vote_packets: &'a VerifiedVotePackets,
         previously_sent_to_bank_votes: &'a mut HashSet<Signature>,
     ) -> Self {

@@ -134,7 +134,7 @@ fn get_first_error(
 
 fn execute_batch(
     batch: &TransactionBatchWithIndexes,
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     transaction_status_sender: Option<&TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
     timings: &mut ExecuteTimings,
@@ -221,7 +221,7 @@ struct ExecuteBatchesInternalMetrics {
 }
 
 fn execute_batches_internal(
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     batches: &[TransactionBatchWithIndexes],
     transaction_status_sender: Option<&TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
@@ -294,7 +294,7 @@ fn execute_batches_internal(
 
 fn rebatch_transactions<'a>(
     lock_results: &'a [Result<()>],
-    bank: &'a Arc<Bank>,
+    bank: &'a solana_runtime::bank_forks::TrackedArcBank,
     sanitized_txs: &'a [SanitizedTransaction],
     start: usize,
     end: usize,
@@ -313,7 +313,7 @@ fn rebatch_transactions<'a>(
 }
 
 fn execute_batches(
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     batches: &[TransactionBatchWithIndexes],
     transaction_status_sender: Option<&TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
@@ -417,7 +417,7 @@ fn execute_batches(
 /// This method is for use testing against a single Bank, and assumes `Bank::transaction_count()`
 /// represents the number of transactions executed in this Bank
 pub fn process_entries_for_tests(
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     entries: Vec<Entry>,
     randomize: bool,
     transaction_status_sender: Option<&TransactionStatusSender>,
@@ -465,7 +465,7 @@ pub fn process_entries_for_tests(
 
 // Note: If randomize is true this will shuffle entries' transactions in-place.
 fn process_entries(
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     entries: &mut [ReplayEntry],
     randomize: bool,
     transaction_status_sender: Option<&TransactionStatusSender>,
@@ -901,7 +901,7 @@ fn verify_ticks(
 
 fn confirm_full_slot(
     blockstore: &Blockstore,
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     opts: &ProcessOptions,
     recyclers: &VerifyRecyclers,
     progress: &mut ConfirmationProgress,
@@ -1062,7 +1062,7 @@ impl ConfirmationProgress {
 #[allow(clippy::too_many_arguments)]
 pub fn confirm_slot(
     blockstore: &Blockstore,
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     timing: &mut ConfirmationTiming,
     progress: &mut ConfirmationProgress,
     skip_verification: bool,
@@ -1107,7 +1107,7 @@ pub fn confirm_slot(
 
 #[allow(clippy::too_many_arguments)]
 fn confirm_slot_entries(
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     slot_entries_load_result: (Vec<Entry>, u64, bool),
     timing: &mut ConfirmationTiming,
     progress: &mut ConfirmationProgress,
@@ -1305,7 +1305,7 @@ fn confirm_slot_entries(
 
 // Special handling required for processing the entries in slot 0
 fn process_bank_0(
-    bank0: &Arc<Bank>,
+    bank0: &solana_runtime::bank_forks::TrackedArcBank,
     blockstore: &Blockstore,
     opts: &ProcessOptions,
     recyclers: &VerifyRecyclers,
@@ -1336,7 +1336,7 @@ fn process_bank_0(
 // Given a bank, add its children to the pending slots queue if those children slots are
 // complete
 fn process_next_slots(
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     meta: &SlotMeta,
     blockstore: &Blockstore,
     leader_schedule_cache: &LeaderScheduleCache,
@@ -1684,7 +1684,7 @@ fn supermajority_root_from_vote_accounts(
 #[allow(clippy::too_many_arguments)]
 fn process_single_slot(
     blockstore: &Blockstore,
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     opts: &ProcessOptions,
     recyclers: &VerifyRecyclers,
     progress: &mut ConfirmationProgress,
@@ -1739,7 +1739,7 @@ pub enum TransactionStatusMessage {
 }
 
 pub struct TransactionStatusBatch {
-    pub bank: Arc<Bank>,
+    pub bank: solana_runtime::bank_forks::TrackedArcBank,
     pub transactions: Vec<SanitizedTransaction>,
     pub execution_results: Vec<Option<TransactionExecutionDetails>>,
     pub balances: TransactionBalancesSet,
@@ -1756,7 +1756,7 @@ pub struct TransactionStatusSender {
 impl TransactionStatusSender {
     pub fn send_transaction_status_batch(
         &self,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         transactions: Vec<SanitizedTransaction>,
         execution_results: Vec<TransactionExecutionResult>,
         balances: TransactionBalancesSet,
@@ -1792,7 +1792,7 @@ impl TransactionStatusSender {
         }
     }
 
-    pub fn send_transaction_status_freeze_message(&self, bank: &Arc<Bank>) {
+    pub fn send_transaction_status_freeze_message(&self, bank: &solana_runtime::bank_forks::TrackedArcBank) {
         let slot = bank.slot();
         if let Err(e) = self.sender.send(TransactionStatusMessage::Freeze(slot)) {
             trace!(
@@ -1804,9 +1804,9 @@ impl TransactionStatusSender {
     }
 }
 
-pub type CacheBlockMetaSender = Sender<Arc<Bank>>;
+pub type CacheBlockMetaSender = Sender<solana_runtime::bank_forks::TrackedArcBank>;
 
-pub fn cache_block_meta(bank: &Arc<Bank>, cache_block_meta_sender: Option<&CacheBlockMetaSender>) {
+pub fn cache_block_meta(bank: &solana_runtime::bank_forks::TrackedArcBank, cache_block_meta_sender: Option<&CacheBlockMetaSender>) {
     if let Some(cache_block_meta_sender) = cache_block_meta_sender {
         cache_block_meta_sender
             .send(bank.clone())
@@ -3678,7 +3678,7 @@ pub mod tests {
 
         let mut i = 0;
         let mut hash = bank.last_blockhash();
-        let mut root: Option<Arc<Bank>> = None;
+        let mut root: Option<solana_runtime::bank_forks::TrackedArcBank> = None;
         loop {
             let entries: Vec<_> = (0..NUM_TRANSFERS)
                 .step_by(NUM_TRANSFERS_PER_ENTRY)
@@ -4233,7 +4233,7 @@ pub mod tests {
     }
 
     fn confirm_slot_entries_for_tests(
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         slot_entries: Vec<Entry>,
         slot_full: bool,
         prev_entry_hash: Hash,

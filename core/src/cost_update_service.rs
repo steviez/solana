@@ -10,7 +10,7 @@ use {
     },
 };
 pub enum CostUpdate {
-    FrozenBank { bank: Arc<Bank> },
+    FrozenBank { bank: solana_runtime::bank_forks::TrackedArcBank },
 }
 
 pub type CostUpdateReceiver = Receiver<CostUpdate>;

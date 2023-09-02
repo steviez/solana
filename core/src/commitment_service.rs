@@ -23,13 +23,13 @@ use {
 };
 
 pub struct CommitmentAggregationData {
-    bank: Arc<Bank>,
+    bank: solana_runtime::bank_forks::TrackedArcBank,
     root: Slot,
     total_stake: Stake,
 }
 
 impl CommitmentAggregationData {
-    pub fn new(bank: Arc<Bank>, root: Slot, total_stake: Stake) -> Self {
+    pub fn new(bank: solana_runtime::bank_forks::TrackedArcBank, root: Slot, total_stake: Stake) -> Self {
         Self {
             bank,
             root,
@@ -488,7 +488,7 @@ mod tests {
 
     #[test]
     fn test_highest_super_majority_root_advance() {
-        fn get_vote_account_root_slot(vote_pubkey: Pubkey, bank: &Arc<Bank>) -> Slot {
+        fn get_vote_account_root_slot(vote_pubkey: Pubkey, bank: &solana_runtime::bank_forks::TrackedArcBank) -> Slot {
             let vote_account = bank.get_vote_account(&vote_pubkey).unwrap();
             let slot = vote_account
                 .vote_state()

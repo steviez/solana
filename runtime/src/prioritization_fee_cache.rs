@@ -426,7 +426,7 @@ mod tests {
     // update fee cache is asynchronous, this test helper blocks until update is completed.
     fn sync_update<'a>(
         prioritization_fee_cache: &mut PrioritizationFeeCache,
-        bank: Arc<Bank>,
+        bank: crate::bank_forks::TrackedArcBank,
         txs: impl Iterator<Item = &'a SanitizedTransaction>,
     ) {
         prioritization_fee_cache.update(&bank, txs);

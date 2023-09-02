@@ -205,7 +205,7 @@ impl Consumer {
 
     fn process_packets_transactions(
         &self,
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         bank_creation_time: &Instant,
         sanitized_transactions: &[SanitizedTransaction],
         banking_stage_stats: &BankingStageStats,
@@ -264,7 +264,7 @@ impl Consumer {
     /// than the total number if max PoH height was reached and the bank halted
     fn process_transactions(
         &self,
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         bank_creation_time: &Instant,
         transactions: &[SanitizedTransaction],
     ) -> ProcessTransactionsSummary {
@@ -389,7 +389,7 @@ impl Consumer {
 
     pub fn process_and_record_transactions(
         &self,
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         txs: &[SanitizedTransaction],
         chunk_offset: usize,
     ) -> ProcessTransactionBatchOutput {
@@ -400,7 +400,7 @@ impl Consumer {
 
     pub fn process_and_record_aged_transactions(
         &self,
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         txs: &[SanitizedTransaction],
         max_slot_ages: &[Slot],
     ) -> ProcessTransactionBatchOutput {
@@ -433,7 +433,7 @@ impl Consumer {
 
     fn process_and_record_transactions_with_pre_results(
         &self,
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         txs: &[SanitizedTransaction],
         chunk_offset: usize,
         pre_results: impl Iterator<Item = Result<(), TransactionError>>,
@@ -526,7 +526,7 @@ impl Consumer {
 
     fn execute_and_commit_transactions_locked(
         &self,
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         batch: &TransactionBatch,
     ) -> ExecuteAndCommitTransactionsOutput {
         let transaction_status_sender_enabled = self.committer.transaction_status_sender_enabled();
@@ -687,7 +687,7 @@ impl Consumer {
     /// * `transactions` - a batch of transactions deserialized from packets
     /// * `pending_indexes` - identifies which indexes in the `transactions` list are still pending
     fn filter_pending_packets_from_pending_txs(
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         transactions: &[SanitizedTransaction],
         pending_indexes: &[usize],
     ) -> Vec<usize> {
@@ -776,7 +776,7 @@ mod tests {
     };
 
     fn execute_transactions_with_dummy_poh_service(
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         transactions: Vec<Transaction>,
     ) -> ProcessTransactionsSummary {
         let transactions = sanitize_transactions(transactions);
@@ -856,7 +856,7 @@ mod tests {
         ledger_path: &Path,
     ) -> (
         Vec<Transaction>,
-        Arc<Bank>,
+        solana_runtime::bank_forks::TrackedArcBank,
         Arc<RwLock<PohRecorder>>,
         Receiver<WorkingBankEntry>,
         JoinHandle<()>,

@@ -143,7 +143,7 @@ fn check_commitment_and_notify<P, S, B, F, X, I>(
 where
     S: Clone + Serialize,
     B: Fn(&Bank, &P) -> X,
-    F: Fn(X, &P, Slot, Arc<Bank>) -> (I, Slot),
+    F: Fn(X, &P, Slot, solana_runtime::bank_forks::TrackedArcBank) -> (I, Slot),
     X: Clone + Default,
     I: IntoIterator<Item = S>,
 {
@@ -371,7 +371,7 @@ fn filter_account_result(
     result: Option<(AccountSharedData, Slot)>,
     params: &AccountSubscriptionParams,
     last_notified_slot: Slot,
-    bank: Arc<Bank>,
+    bank: solana_runtime::bank_forks::TrackedArcBank,
 ) -> (Option<UiAccount>, Slot) {
     // If the account is not found, `last_modified_slot` will default to zero and
     // we will notify clients that the account no longer exists if we haven't already
@@ -395,7 +395,7 @@ fn filter_signature_result(
     result: Option<transaction::Result<()>>,
     _params: &SignatureSubscriptionParams,
     last_notified_slot: Slot,
-    _bank: Arc<Bank>,
+    _bank: solana_runtime::bank_forks::TrackedArcBank,
 ) -> (Option<RpcSignatureResult>, Slot) {
     (
         result.map(|result| {
@@ -409,7 +409,7 @@ fn filter_program_results(
     accounts: Vec<(Pubkey, AccountSharedData)>,
     params: &ProgramSubscriptionParams,
     last_notified_slot: Slot,
-    bank: Arc<Bank>,
+    bank: solana_runtime::bank_forks::TrackedArcBank,
 ) -> (impl Iterator<Item = RpcKeyedAccount>, Slot) {
     let accounts_is_empty = accounts.is_empty();
     let encoding = params.encoding;
@@ -439,7 +439,7 @@ fn filter_logs_results(
     logs: Option<Vec<TransactionLogInfo>>,
     _params: &LogsSubscriptionParams,
     last_notified_slot: Slot,
-    _bank: Arc<Bank>,
+    _bank: solana_runtime::bank_forks::TrackedArcBank,
 ) -> (impl Iterator<Item = RpcLogsResponse>, Slot) {
     let responses = logs.into_iter().flatten().map(|log| RpcLogsResponse {
         signature: log.signature.to_string(),

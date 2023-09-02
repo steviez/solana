@@ -584,8 +584,8 @@ impl SendTransactionService {
 
     /// Retry transactions sent before.
     fn process_transactions<T: TpuInfo + std::marker::Send + 'static>(
-        working_bank: &Arc<Bank>,
-        root_bank: &Arc<Bank>,
+        working_bank: &solana_runtime::bank_forks::TrackedArcBank,
+        root_bank: &solana_runtime::bank_forks::TrackedArcBank,
         tpu_address: &SocketAddr,
         transactions: &mut HashMap<Signature, TransactionInfo>,
         leader_info_provider: &Arc<Mutex<CurrentLeaderInfo<T>>>,

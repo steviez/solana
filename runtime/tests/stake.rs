@@ -31,7 +31,7 @@ use {
     std::sync::Arc,
 };
 
-fn next_epoch(bank: &Arc<Bank>) -> Arc<Bank> {
+fn next_epoch(bank: &solana_runtime::bank_forks::TrackedArcBank) -> Arc<Bank> {
     bank.squash();
 
     Arc::new(Bank::new_from_parent(
@@ -42,10 +42,10 @@ fn next_epoch(bank: &Arc<Bank>) -> Arc<Bank> {
 }
 
 fn fill_epoch_with_votes(
-    bank: &Arc<Bank>,
+    bank: &solana_runtime::bank_forks::TrackedArcBank,
     vote_keypair: &Keypair,
     mint_keypair: &Keypair,
-) -> Arc<Bank> {
+) -> solana_runtime::bank_forks::TrackedArcBank {
     let mint_pubkey = mint_keypair.pubkey();
     let vote_pubkey = vote_keypair.pubkey();
     let old_epoch = bank.epoch();

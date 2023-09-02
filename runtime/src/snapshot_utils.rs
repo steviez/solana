@@ -3381,7 +3381,7 @@ pub fn create_snapshot_dirs_for_tests(
     num_total: usize,
     num_posts: usize,
 ) -> Bank {
-    let mut bank = Arc::new(Bank::new_for_tests(genesis_config));
+    let mut bank = crate::bank_forks::TrackedArcBank::new_from_arc_bank(Arc::new(Bank::new_for_tests(genesis_config)));
 
     let collecter_id = Pubkey::new_unique();
     let snapshot_version = SnapshotVersion::default();
@@ -3389,7 +3389,7 @@ pub fn create_snapshot_dirs_for_tests(
     // loop to create the banks at slot 1 to num_total
     for _ in 0..num_total {
         // prepare the bank
-        bank = Arc::new(Bank::new_from_parent(&bank, &collecter_id, bank.slot() + 1));
+        bank = crate::bank_forks::TrackedArcBank::new_from_arc_bank(Arc::new(Bank::new_from_parent(&bank, &collecter_id, bank.slot() + 1)));
         bank.fill_bank_with_ticks_for_tests();
         bank.squash();
         bank.force_flush_accounts_cache();
@@ -3422,7 +3422,7 @@ pub fn create_snapshot_dirs_for_tests(
         );
     }
 
-    Arc::try_unwrap(bank).unwrap()
+    Arc::try_unwrap(bank.naughty_naughty()).unwrap()
 }
 
 #[cfg(test)]
