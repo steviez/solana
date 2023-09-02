@@ -56,6 +56,118 @@ struct SetRootTimings {
     prune_remove_ms: i64,
 }
 
+// Atomic to ensure unique id's for tracked items
+static UNIQUE_ID: AtomicU64 = AtomicU64::new(0);
+// Global container to store active TrackedArcBank's (by id)
+lazy_static::lazy_static! {
+    static ref BANK_TRACKER: Arc<std::sync::Mutex<Tracker>> =
+        Arc::new(std::sync::Mutex::new(Tracker::default()));
+}
+
+#[derive(Default)]
+struct Tracker {
+    /// Set of ids that are currently active
+    active_ids: HashSet<u64>,
+    /// Slots to track
+    tracked_slots: HashSet<u64>,
+}
+
+impl Tracker {
+    /// Add a new slot to track items for
+    pub fn register_tracked_slot(&mut self, slot: Slot) {
+        self.tracked_slots.insert(slot);
+    }
+
+    /// Register the passed id if the slot is a tracked one
+    pub fn maybe_register(&mut self, slot: Slot, id: u64) {
+        if !self.is_slot_tracked(slot) {
+            return;
+        };
+
+        let bt = format!("{}", std::backtrace::Backtrace::capture());
+        let num_active = self.active_ids.len();
+        // Log backtrace of this id for later cross-reference
+        info!("Tracker reference count incremented to {num_active} for {slot}, new id {id}\n{bt}");
+
+        self.active_ids.insert(id);
+    }
+
+    /// Unregister the passed id
+    pub fn maybe_unregister(&mut self, slot: Slot, id: u64) {
+        if !self.is_slot_tracked(slot) {
+            return;
+        };
+
+        let id_present = self.active_ids.remove(&id);
+        if !id_present {
+            error!("Tracked id was dropped that was not present in, maybe already dropped: {id}");
+        }
+
+        let remaining: Vec<_> = self.active_ids.iter().collect();
+        let num_remaining = remaining.len();
+        info!("Tracker reference count decremented to {num_remaining}, items: {remaining:?}");
+    }
+
+    /// Get a new unique id for a tracked item
+    pub fn get_new_id() -> u64 {
+        UNIQUE_ID.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Returns true if this slot is being tracked. If not slots to track have
+    /// been registered, track all slots
+    fn is_slot_tracked(&self, slot: Slot) -> bool {
+        self.tracked_slots.is_empty() || self.tracked_slots.contains(&slot)
+    }
+}
+
+/// Wrapper over Arc<Bank> to track Arc handles and find stranded references
+pub struct TrackedArcBank {
+    /// Underlying bank
+    bank: Arc<Bank>,
+    /// Unique id
+    id: u64,
+}
+
+impl TrackedArcBank {
+    pub fn new_from_arc_bank(bank: Arc<Bank>) -> Self {
+        let id = Tracker::get_new_id();
+        let slot = bank.slot();
+        BANK_TRACKER.lock().unwrap().maybe_register(slot, id);
+
+        Self { bank, id }
+    }
+}
+
+impl Clone for TrackedArcBank {
+    fn clone(&self) -> Self {
+        let bank = Arc::clone(&self.bank);
+        Self::new_from_arc_bank(bank)
+    }
+}
+
+impl Drop for TrackedArcBank {
+    fn drop(&mut self) {
+        let slot = self.bank.slot();
+        let id = self.id;
+        BANK_TRACKER.lock().unwrap().maybe_unregister(slot, id);
+    }
+}
+
+impl AsRef<Bank> for TrackedArcBank {
+    fn as_ref(&self) -> &Bank {
+        self.bank.as_ref()
+    }
+}
+
+impl std::ops::Deref for TrackedArcBank {
+    type Target = Bank;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.bank
+    }
+}
+
 pub struct BankForks {
     banks: HashMap<Slot, Arc<Bank>>,
     descendants: HashMap<Slot, HashSet<Slot>>,
