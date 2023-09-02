@@ -162,9 +162,9 @@ mod tests {
     }
 
     fn create_test_address_lookup_table(
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         num_addresses: usize,
-    ) -> (Arc<Bank>, Pubkey) {
+    ) -> (solana_runtime::bank_forks::TrackedArcBank, Pubkey) {
         let mut addresses = Vec::with_capacity(num_addresses);
         addresses.resize_with(num_addresses, Pubkey::new_unique);
         let address_lookup_table = AddressLookupTable {
@@ -189,7 +189,7 @@ mod tests {
         )
     }
 
-    fn create_test_bank() -> Arc<Bank> {
+    fn create_test_bank() -> solana_runtime::bank_forks::TrackedArcBank {
         let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10_000);
         Arc::new(Bank::new_no_wallclock_throttle_for_tests(&genesis_config))
     }

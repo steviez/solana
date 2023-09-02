@@ -266,7 +266,7 @@ pub struct BankRc {
     pub accounts: Arc<Accounts>,
 
     /// Previous checkpoint of this bank
-    pub(crate) parent: RwLock<Option<Arc<Bank>>>,
+    pub(crate) parent: RwLock<Option<crate::bank_forks::TrackedArcBank>>,
 
     /// Current slot
     pub(crate) slot: Slot,
@@ -1172,7 +1172,7 @@ impl Bank {
     }
 
     /// Create a new bank that points to an immutable checkpoint of another bank.
-    pub fn new_from_parent(parent: Arc<Bank>, collector_id: &Pubkey, slot: Slot) -> Self {
+    pub fn new_from_parent(parent: crate::bank_forks::TrackedArcBank, collector_id: &Pubkey, slot: Slot) -> Self {
         Self::_new_from_parent(
             parent,
             collector_id,
@@ -1183,7 +1183,7 @@ impl Bank {
     }
 
     pub fn new_from_parent_with_options(
-        parent: Arc<Bank>,
+        parent: crate::bank_forks::TrackedArcBank,
         collector_id: &Pubkey,
         slot: Slot,
         new_bank_options: NewBankOptions,
@@ -1192,7 +1192,7 @@ impl Bank {
     }
 
     pub fn new_from_parent_with_tracer(
-        parent: Arc<Bank>,
+        parent: crate::bank_forks::TrackedArcBank,
         collector_id: &Pubkey,
         slot: Slot,
         reward_calc_tracer: impl RewardCalcTracer,
@@ -1281,7 +1281,7 @@ impl Bank {
     }
 
     fn _new_from_parent(
-        parent: Arc<Bank>,
+        parent: crate::bank_forks::TrackedArcBank,
         collector_id: &Pubkey,
         slot: Slot,
         reward_calc_tracer: Option<impl RewardCalcTracer>,
@@ -1303,7 +1303,7 @@ impl Bank {
             accounts_db.insert_default_bank_hash_stats(slot, parent.slot());
             BankRc {
                 accounts: Arc::new(Accounts::new(accounts_db)),
-                parent: RwLock::new(Some(Arc::clone(&parent))),
+                parent: RwLock::new(Some(parent.clone())),
                 slot,
                 bank_id_generator: Arc::clone(&parent.rc.bank_id_generator),
             }
@@ -1723,7 +1723,7 @@ impl Bank {
     /// * Freezes the new bank, assuming that the user will `Bank::new_from_parent` from this bank
     /// * Calculates and sets the epoch accounts hash from the parent
     pub fn warp_from_parent(
-        parent: Arc<Bank>,
+        parent: crate::bank_forks::TrackedArcBank,
         collector_id: &Pubkey,
         slot: Slot,
         data_source: CalcAccountsHashDataSource,
@@ -3817,7 +3817,7 @@ impl Bank {
     }
 
     /// Return the more recent checkpoint of this bank instance.
-    pub fn parent(&self) -> Option<Arc<Bank>> {
+    pub fn parent(&self) -> Option<crate::bank_forks::TrackedArcBank> {
         self.rc.parent.read().unwrap().clone()
     }
 
@@ -6531,7 +6531,7 @@ impl Bank {
     }
 
     /// Compute all the parents of the bank in order
-    pub fn parents(&self) -> Vec<Arc<Bank>> {
+    pub fn parents(&self) -> Vec<crate::bank_forks::TrackedArcBank> {
         let mut parents = vec![];
         let mut bank = self.parent();
         while let Some(parent) = bank {
@@ -6542,9 +6542,10 @@ impl Bank {
     }
 
     /// Compute all the parents of the bank including this bank itself
-    pub fn parents_inclusive(self: Arc<Self>) -> Vec<Arc<Bank>> {
+    pub fn parents_inclusive(self: Arc<Self>) -> Vec<crate::bank_forks::TrackedArcBank> {
         let mut parents = self.parents();
-        parents.insert(0, self);
+        let this_bank = crate::bank_forks::TrackedArcBank::new_from_arc_bank(self);
+        parents.insert(0, this_bank);
         parents
     }
 

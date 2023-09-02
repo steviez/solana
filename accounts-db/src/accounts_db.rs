@@ -5410,7 +5410,7 @@ impl AccountsDb {
                 // Everything being assert!()-ed, let's panic!() here as it's an error condition
                 // after all....
                 // That reasoning is based on the fact all of code-path reaching this fn
-                // retry_to_get_account_accessor() must outlive the Arc<Bank> (and its all
+                // retry_to_get_account_accessor() must outlive the solana_runtime::bank_forks::TrackedArcBank (and its all
                 // ancestors) over this fn invocation, guaranteeing the prevention of being purged,
                 // first of all.
                 // For details, see the comment in AccountIndex::do_checked_scan_accounts(),

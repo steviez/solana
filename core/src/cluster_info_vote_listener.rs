@@ -145,13 +145,13 @@ impl VoteTracker {
 }
 
 struct BankVoteSenderState {
-    bank: Arc<Bank>,
+    bank: solana_runtime::bank_forks::TrackedArcBank,
     previously_sent_to_bank_votes: HashSet<Signature>,
     bank_send_votes_stats: BankSendVotesStats,
 }
 
 impl BankVoteSenderState {
-    fn new(bank: Arc<Bank>) -> Self {
+    fn new(bank: solana_runtime::bank_forks::TrackedArcBank) -> Self {
         Self {
             bank,
             previously_sent_to_bank_votes: HashSet::new(),
@@ -423,7 +423,7 @@ impl ClusterInfoVoteListener {
 
     fn check_for_leader_bank_and_send_votes(
         bank_vote_sender_state_option: &mut Option<BankVoteSenderState>,
-        current_working_bank: Option<Arc<Bank>>,
+        current_working_bank: Option<solana_runtime::bank_forks::TrackedArcBank>,
         verified_packets_sender: &BankingPacketSender,
         verified_vote_packets: &VerifiedVotePackets,
     ) -> Result<()> {
@@ -1541,7 +1541,7 @@ mod tests {
 
     fn setup() -> (
         Arc<VoteTracker>,
-        Arc<Bank>,
+        solana_runtime::bank_forks::TrackedArcBank,
         Vec<ValidatorVoteKeypairs>,
         Arc<RpcSubscriptions>,
     ) {

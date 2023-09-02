@@ -14,8 +14,8 @@ use {
 };
 
 pub struct SelectVoteAndResetForkResult {
-    pub vote_bank: Option<(Arc<Bank>, SwitchForkDecision)>,
-    pub reset_bank: Option<Arc<Bank>>,
+    pub vote_bank: Option<(solana_runtime::bank_forks::TrackedArcBank, SwitchForkDecision)>,
+    pub reset_bank: Option<solana_runtime::bank_forks::TrackedArcBank>,
     pub heaviest_fork_failures: Vec<HeaviestForkFailures>,
 }
 
@@ -34,12 +34,12 @@ pub trait ForkChoice {
     // switching proof to vote for)
     fn select_forks(
         &self,
-        frozen_banks: &[Arc<Bank>],
+        frozen_banks: &[solana_runtime::bank_forks::TrackedArcBank],
         tower: &Tower,
         progress: &ProgressMap,
         ancestors: &HashMap<u64, HashSet<u64>>,
         bank_forks: &RwLock<BankForks>,
-    ) -> (Arc<Bank>, Option<Arc<Bank>>);
+    ) -> (solana_runtime::bank_forks::TrackedArcBank, Option<solana_runtime::bank_forks::TrackedArcBank>);
 
     fn mark_fork_invalid_candidate(&mut self, invalid_slot: &Self::ForkChoiceKey);
 

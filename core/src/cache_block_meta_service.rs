@@ -14,7 +14,7 @@ use {
     },
 };
 
-pub type CacheBlockMetaReceiver = Receiver<Arc<Bank>>;
+pub type CacheBlockMetaReceiver = Receiver<solana_runtime::bank_forks::TrackedArcBank>;
 
 pub struct CacheBlockMetaService {
     thread_hdl: JoinHandle<()>,
@@ -57,7 +57,7 @@ impl CacheBlockMetaService {
         Self { thread_hdl }
     }
 
-    fn cache_block_meta(bank: Arc<Bank>, blockstore: &Blockstore) {
+    fn cache_block_meta(bank: solana_runtime::bank_forks::TrackedArcBank, blockstore: &Blockstore) {
         if let Err(e) = blockstore.cache_block_time(bank.slot(), bank.clock().unix_timestamp) {
             error!("cache_block_time failed: slot {:?} {:?}", bank.slot(), e);
         }

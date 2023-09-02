@@ -228,7 +228,7 @@ mod tests {
         std::{collections::BTreeMap, sync::Arc},
     };
 
-    fn new_from_parent(parent: Arc<Bank>) -> Bank {
+    fn new_from_parent(parent: crate::bank_forks::TrackedArcBank) -> Bank {
         let slot = parent.slot() + 1;
         let collector_id = Pubkey::default();
         Bank::new_from_parent(parent, &collector_id, slot)

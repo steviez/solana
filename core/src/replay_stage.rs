@@ -494,7 +494,7 @@ impl ReplayStage {
         cluster_slots_update_sender: ClusterSlotsUpdateSender,
         cost_update_sender: Sender<CostUpdate>,
         voting_sender: Sender<VoteOp>,
-        drop_bank_sender: Sender<Vec<Arc<Bank>>>,
+        drop_bank_sender: Sender<Vec<solana_runtime::bank_forks::TrackedArcBank>>,
         block_metadata_notifier: Option<BlockMetadataNotifierLock>,
         log_messages_bytes_limit: Option<usize>,
         prioritization_fee_cache: Arc<PrioritizationFeeCache>,
@@ -1244,7 +1244,7 @@ impl ReplayStage {
 
     pub fn initialize_progress_and_fork_choice(
         root_bank: &Bank,
-        mut frozen_banks: Vec<Arc<Bank>>,
+        mut frozen_banks: Vec<solana_runtime::bank_forks::TrackedArcBank>,
         my_pubkey: &Pubkey,
         vote_account: &Pubkey,
     ) -> (ProgressMap, HeaviestSubtreeForkChoice) {
@@ -1489,7 +1489,7 @@ impl ReplayStage {
 
         // Grab the Slot and BankId's of the banks we need to purge, then clear the banks
         // from BankForks
-        let (slots_to_purge, removed_banks): (Vec<(Slot, BankId)>, Vec<Arc<Bank>>) = {
+        let (slots_to_purge, removed_banks): (Vec<(Slot, BankId)>, Vec<solana_runtime::bank_forks::TrackedArcBank>) = {
             let mut w_bank_forks = bank_forks.write().unwrap();
             slot_descendants
                 .iter()
@@ -1979,7 +1979,7 @@ impl ReplayStage {
 
     #[allow(clippy::too_many_arguments)]
     fn replay_blockstore_into_bank(
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         blockstore: &Blockstore,
         replay_stats: &RwLock<ReplaySlotStats>,
         replay_progress: &RwLock<ConfirmationProgress>,
@@ -2090,7 +2090,7 @@ impl ReplayStage {
 
     #[allow(clippy::too_many_arguments)]
     fn handle_votable_bank(
-        bank: &Arc<Bank>,
+        bank: &solana_runtime::bank_forks::TrackedArcBank,
         switch_fork_decision: &SwitchForkDecision,
         bank_forks: &Arc<RwLock<BankForks>>,
         tower: &mut Tower,
@@ -2115,7 +2115,7 @@ impl ReplayStage {
         replay_timing: &mut ReplayTiming,
         voting_sender: &Sender<VoteOp>,
         epoch_slots_frozen_slots: &mut EpochSlotsFrozenSlots,
-        drop_bank_sender: &Sender<Vec<Arc<Bank>>>,
+        drop_bank_sender: &Sender<Vec<solana_runtime::bank_forks::TrackedArcBank>>,
         wait_to_vote_slot: Option<Slot>,
     ) {
         if bank.is_empty() {
@@ -2475,7 +2475,7 @@ impl ReplayStage {
     }
 
     fn update_commitment_cache(
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         root: Slot,
         total_stake: Stake,
         lockouts_sender: &Sender<CommitmentAggregationData>,
@@ -2490,7 +2490,7 @@ impl ReplayStage {
     fn reset_poh_recorder(
         my_pubkey: &Pubkey,
         blockstore: &Blockstore,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         poh_recorder: &RwLock<PohRecorder>,
         leader_schedule_cache: &LeaderScheduleCache,
     ) {
@@ -2996,7 +2996,7 @@ impl ReplayStage {
     pub fn compute_bank_stats(
         my_vote_pubkey: &Pubkey,
         ancestors: &HashMap<u64, HashSet<u64>>,
-        frozen_banks: &mut Vec<Arc<Bank>>,
+        frozen_banks: &mut Vec<solana_runtime::bank_forks::TrackedArcBank>,
         tower: &mut Tower,
         progress: &mut ProgressMap,
         vote_tracker: &VoteTracker,
@@ -3334,9 +3334,9 @@ impl ReplayStage {
     /// Until this is resolved, leaders will build each of their
     /// blocks from the last reset bank on the invalid fork.
     pub fn select_vote_and_reset_forks(
-        heaviest_bank: &Arc<Bank>,
+        heaviest_bank: &solana_runtime::bank_forks::TrackedArcBank,
         // Should only be None if there was no previous vote
-        heaviest_bank_on_same_voted_fork: Option<&Arc<Bank>>,
+        heaviest_bank_on_same_voted_fork: Option<&solana_runtime::bank_forks::TrackedArcBank>,
         ancestors: &HashMap<u64, HashSet<u64>>,
         descendants: &HashMap<u64, HashSet<u64>>,
         progress: &ProgressMap,
@@ -3738,7 +3738,7 @@ impl ReplayStage {
         has_new_vote_been_rooted: &mut bool,
         voted_signatures: &mut Vec<Signature>,
         epoch_slots_frozen_slots: &mut EpochSlotsFrozenSlots,
-        drop_bank_sender: &Sender<Vec<Arc<Bank>>>,
+        drop_bank_sender: &Sender<Vec<solana_runtime::bank_forks::TrackedArcBank>>,
     ) {
         let removed_banks = bank_forks.write().unwrap().set_root(
             new_root,
@@ -3879,7 +3879,7 @@ impl ReplayStage {
     }
 
     fn new_bank_from_parent_with_notify(
-        parent: Arc<Bank>,
+        parent: solana_runtime::bank_forks::TrackedArcBank,
         slot: u64,
         root_slot: u64,
         leader: &Pubkey,
@@ -4604,7 +4604,7 @@ pub(crate) mod tests {
     // marked as dead. Returns the error for caller to verify.
     fn check_dead_fork<F>(shred_to_insert: F) -> result::Result<(), BlockstoreProcessorError>
     where
-        F: Fn(&Keypair, Arc<Bank>) -> Vec<Shred>,
+        F: Fn(&Keypair, solana_runtime::bank_forks::TrackedArcBank) -> Vec<Shred>,
     {
         let ledger_path = get_tmp_ledger_path!();
         let (replay_vote_sender, _replay_vote_receiver) = unbounded();
@@ -7310,7 +7310,7 @@ pub(crate) mod tests {
 
     #[allow(clippy::too_many_arguments)]
     fn send_vote_in_new_bank(
-        parent_bank: Arc<Bank>,
+        parent_bank: solana_runtime::bank_forks::TrackedArcBank,
         my_slot: Slot,
         my_vote_keypair: &[Arc<Keypair>],
         tower: &mut Tower,
@@ -7326,7 +7326,7 @@ pub(crate) mod tests {
         cursor: &mut Cursor,
         bank_forks: &RwLock<BankForks>,
         progress: &mut ProgressMap,
-    ) -> Arc<Bank> {
+    ) -> solana_runtime::bank_forks::TrackedArcBank {
         let my_vote_pubkey = &my_vote_keypair[0].pubkey();
         tower.record_bank_vote(&parent_bank);
         ReplayStage::push_vote(

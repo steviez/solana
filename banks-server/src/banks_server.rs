@@ -135,8 +135,8 @@ impl BanksServer {
             .slot_with_commitment(commitment)
     }
 
-    fn bank(&self, commitment: CommitmentLevel) -> Arc<Bank> {
-        self.bank_forks.read().unwrap()[self.slot(commitment)].clone()
+    fn bank(&self, commitment: CommitmentLevel) -> solana_runtime::bank_forks::TrackedArcBank {
+        solana_runtime::bank_forks::TrackedArcBank::new_from_arc_bank(self.bank_forks.read().unwrap()[self.slot(commitment)].clone())
     }
 
     async fn poll_signature_status(

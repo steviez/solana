@@ -634,7 +634,7 @@ pub mod test {
     struct MockBroadcastStage {
         blockstore: Arc<Blockstore>,
         broadcast_service: BroadcastStage,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
     }
 
     fn setup_dummy_broadcast_service(

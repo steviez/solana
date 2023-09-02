@@ -69,7 +69,7 @@ impl ConsumeWorker {
     }
 
     /// Consume a single batch.
-    fn consume(&self, bank: &Arc<Bank>, work: ConsumeWork) -> Result<(), ConsumeWorkerError> {
+    fn consume(&self, bank: &solana_runtime::bank_forks::TrackedArcBank, work: ConsumeWork) -> Result<(), ConsumeWorkerError> {
         let ProcessTransactionBatchOutput {
             execute_and_commit_transactions_output:
                 ExecuteAndCommitTransactionsOutput {
@@ -91,10 +91,11 @@ impl ConsumeWorker {
     }
 
     /// Try to get a bank for consuming.
-    fn get_consume_bank(&self) -> Option<Arc<Bank>> {
+    fn get_consume_bank(&self) -> Option<solana_runtime::bank_forks::TrackedArcBank> {
         self.leader_bank_notifier
             .get_or_wait_for_in_progress(Duration::from_millis(50))
             .upgrade()
+            .map(solana_runtime::bank_forks::TrackedArcBank::new_from_arc_bank)
     }
 
     /// Retry current batch and all outstanding batches.
@@ -158,7 +159,7 @@ mod tests {
     struct TestFrame {
         mint_keypair: Keypair,
         genesis_config: GenesisConfig,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         _ledger_path: TempDir,
         _entry_receiver: Receiver<WorkingBankEntry>,
         poh_recorder: Arc<RwLock<PohRecorder>>,

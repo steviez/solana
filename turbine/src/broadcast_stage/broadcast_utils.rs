@@ -19,7 +19,7 @@ pub(super) struct ReceiveResults {
     pub entries: Vec<Entry>,
     pub time_elapsed: Duration,
     pub time_coalesced: Duration,
-    pub bank: Arc<Bank>,
+    pub bank: solana_runtime::bank_forks::TrackedArcBank,
     pub last_tick_height: u64,
 }
 
@@ -108,7 +108,7 @@ mod tests {
         },
     };
 
-    fn setup_test() -> (GenesisConfig, Arc<Bank>, Transaction) {
+    fn setup_test() -> (GenesisConfig, solana_runtime::bank_forks::TrackedArcBank, Transaction) {
         let GenesisConfigInfo {
             genesis_config,
             mint_keypair,

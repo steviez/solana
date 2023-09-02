@@ -35,7 +35,7 @@ pub fn get_parsed_token_account(
 }
 
 pub fn get_parsed_token_accounts<I>(
-    bank: Arc<Bank>,
+    bank: solana_runtime::bank_forks::TrackedArcBank,
     keyed_accounts: I,
 ) -> impl Iterator<Item = RpcKeyedAccount>
 where

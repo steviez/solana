@@ -517,7 +517,7 @@ mod test {
         Arc<Blockstore>,
         GenesisConfig,
         Arc<ClusterInfo>,
-        Arc<Bank>,
+        solana_runtime::bank_forks::TrackedArcBank,
         Arc<Keypair>,
         UdpSocket,
         Arc<RwLock<BankForks>>,

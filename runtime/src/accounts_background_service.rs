@@ -109,7 +109,7 @@ impl SendDroppedBankCallback {
 }
 
 pub struct SnapshotRequest {
-    pub snapshot_root_bank: Arc<Bank>,
+    pub snapshot_root_bank: crate::bank_forks::TrackedArcBank,
     pub status_cache_slot_deltas: Vec<BankSlotDelta>,
     pub request_kind: SnapshotRequestKind,
 

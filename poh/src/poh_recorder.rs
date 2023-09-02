@@ -62,11 +62,11 @@ pub enum PohRecorderError {
 
 type Result<T> = std::result::Result<T, PohRecorderError>;
 
-pub type WorkingBankEntry = (Arc<Bank>, (Entry, u64));
+pub type WorkingBankEntry = (solana_runtime::bank_forks::TrackedArcBank, (Entry, u64));
 
 #[derive(Debug, Clone)]
 pub struct BankStart {
-    pub working_bank: Arc<Bank>,
+    pub working_bank: solana_runtime::bank_forks::TrackedArcBank,
     pub bank_creation_time: Arc<Instant>,
 }
 
@@ -245,7 +245,7 @@ impl TransactionRecorder {
 
 pub enum PohRecorderBank {
     WorkingBank(BankStart),
-    LastResetBank(Arc<Bank>),
+    LastResetBank(solana_runtime::bank_forks::TrackedArcBank),
 }
 
 impl PohRecorderBank {
@@ -266,7 +266,7 @@ impl PohRecorderBank {
 
 #[derive(Clone)]
 pub struct WorkingBank {
-    pub bank: Arc<Bank>,
+    pub bank: solana_runtime::bank_forks::TrackedArcBank,
     pub start: Arc<Instant>,
     pub min_tick_height: u64,
     pub max_tick_height: u64,
@@ -283,7 +283,7 @@ pub struct PohRecorder {
     pub poh: Arc<Mutex<Poh>>,
     tick_height: u64,
     clear_bank_signal: Option<Sender<bool>>,
-    start_bank: Arc<Bank>,         // parent slot
+    start_bank: solana_runtime::bank_forks::TrackedArcBank,         // parent slot
     start_tick_height: u64,        // first tick_height this recorder will observe
     tick_cache: Vec<(Entry, u64)>, // cache of entry and its tick_height
     working_bank: Option<WorkingBank>,
@@ -398,7 +398,7 @@ impl PohRecorder {
         self.leader_after_n_slots(1)
     }
 
-    pub fn bank(&self) -> Option<Arc<Bank>> {
+    pub fn bank(&self) -> Option<solana_runtime::bank_forks::TrackedArcBank> {
         self.working_bank.as_ref().map(|w| w.bank.clone())
     }
 
@@ -547,7 +547,7 @@ impl PohRecorder {
             ))
     }
 
-    fn reset_poh(&mut self, reset_bank: Arc<Bank>, reset_start_bank: bool) {
+    fn reset_poh(&mut self, reset_bank: solana_runtime::bank_forks::TrackedArcBank, reset_start_bank: bool) {
         let blockhash = reset_bank.last_blockhash();
         let poh_hash = {
             let mut poh = self.poh.lock().unwrap();
@@ -572,7 +572,7 @@ impl PohRecorder {
     }
 
     // synchronize PoH with a bank
-    pub fn reset(&mut self, reset_bank: Arc<Bank>, next_leader_slot: Option<(Slot, Slot)>) {
+    pub fn reset(&mut self, reset_bank: solana_runtime::bank_forks::TrackedArcBank, next_leader_slot: Option<(Slot, Slot)>) {
         self.clear_bank();
         self.reset_poh(reset_bank, true);
 
@@ -596,7 +596,7 @@ impl PohRecorder {
         self.leader_last_tick_height = leader_last_tick_height;
     }
 
-    pub fn set_bank(&mut self, bank: Arc<Bank>, track_transaction_indexes: bool) {
+    pub fn set_bank(&mut self, bank: solana_runtime::bank_forks::TrackedArcBank, track_transaction_indexes: bool) {
         assert!(self.working_bank.is_none());
         self.leader_bank_notifier.set_in_progress(&bank);
         let working_bank = WorkingBank {
@@ -928,7 +928,7 @@ impl PohRecorder {
     pub fn new_with_clear_signal(
         tick_height: u64,
         last_entry_hash: Hash,
-        start_bank: Arc<Bank>,
+        start_bank: solana_runtime::bank_forks::TrackedArcBank,
         next_leader_slot: Option<(Slot, Slot)>,
         ticks_per_slot: u64,
         id: &Pubkey,
@@ -999,7 +999,7 @@ impl PohRecorder {
     pub fn new(
         tick_height: u64,
         last_entry_hash: Hash,
-        start_bank: Arc<Bank>,
+        start_bank: solana_runtime::bank_forks::TrackedArcBank,
         next_leader_slot: Option<(Slot, Slot)>,
         ticks_per_slot: u64,
         id: &Pubkey,
@@ -1046,13 +1046,13 @@ impl PohRecorder {
     // Used in tests
     pub fn schedule_dummy_max_height_reached_failure(&mut self) {
         let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(2);
-        let bank = Arc::new(Bank::new_for_tests(&genesis_config));
+        let bank = solana_runtime::bank_forks::TrackedArcBank::new_from_arc_bank(Arc::new(Bank::new_for_tests(&genesis_config)));
         self.reset(bank, None);
     }
 }
 
 pub fn create_test_recorder(
-    bank: Arc<Bank>,
+    bank: solana_runtime::bank_forks::TrackedArcBank,
     blockstore: Arc<Blockstore>,
     poh_config: Option<PohConfig>,
     leader_schedule_cache: Option<Arc<LeaderScheduleCache>>,

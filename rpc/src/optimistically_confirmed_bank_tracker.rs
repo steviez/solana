@@ -28,7 +28,7 @@ use {
 };
 
 pub struct OptimisticallyConfirmedBank {
-    pub bank: Arc<Bank>,
+    pub bank: solana_runtime::bank_forks::TrackedArcBank,
 }
 
 impl OptimisticallyConfirmedBank {
@@ -42,8 +42,8 @@ impl OptimisticallyConfirmedBank {
 #[derive(Clone)]
 pub enum BankNotification {
     OptimisticallyConfirmed(Slot),
-    Frozen(Arc<Bank>),
-    NewRootBank(Arc<Bank>),
+    Frozen(solana_runtime::bank_forks::TrackedArcBank),
+    NewRootBank(solana_runtime::bank_forks::TrackedArcBank),
     /// The newly rooted slot chain including the parent slot of the oldest bank in the rooted chain.
     NewRootedChain(Vec<Slot>),
 }
@@ -204,13 +204,13 @@ impl OptimisticallyConfirmedBankTracker {
     fn notify_or_defer_confirmed_banks(
         subscriptions: &RpcSubscriptions,
         bank_forks: &RwLock<BankForks>,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         slot_threshold: Slot,
         last_notified_confirmed_slot: &mut Slot,
         pending_optimistically_confirmed_banks: &mut HashSet<Slot>,
         slot_notification_subscribers: &Option<Arc<RwLock<Vec<SlotNotificationSender>>>>,
     ) {
-        for confirmed_bank in bank.parents_inclusive().iter().rev() {
+        for confirmed_bank in bank.naughty_naughty().parents_inclusive().iter().rev() {
             if confirmed_bank.slot() > slot_threshold {
                 debug!(
                     "Calling notify_or_defer for confirmed_bank {:?}",

@@ -30,7 +30,7 @@ impl RootBankCache {
         }
     }
 
-    pub fn root_bank(&mut self) -> Arc<Bank> {
+    pub fn root_bank(&mut self) -> crate::bank_forks::TrackedArcBank {
         match self.cached_root_bank.upgrade() {
             Some(cached_root_bank) if cached_root_bank.slot() == self.root_slot.get() => {
                 cached_root_bank

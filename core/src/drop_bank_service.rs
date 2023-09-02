@@ -13,7 +13,7 @@ pub struct DropBankService {
 }
 
 impl DropBankService {
-    pub fn new(bank_receiver: Receiver<Vec<Arc<Bank>>>) -> Self {
+    pub fn new(bank_receiver: Receiver<Vec<solana_runtime::bank_forks::TrackedArcBank>>) -> Self {
         let thread_hdl = Builder::new()
             .name("solDropBankSrvc".to_string())
             .spawn(move || {

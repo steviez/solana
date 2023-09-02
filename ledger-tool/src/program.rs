@@ -73,7 +73,7 @@ fn load_accounts(path: &Path) -> Result<Input> {
     Ok(input)
 }
 
-fn load_blockstore(ledger_path: &Path, arg_matches: &ArgMatches<'_>) -> Arc<Bank> {
+fn load_blockstore(ledger_path: &Path, arg_matches: &ArgMatches<'_>) -> solana_runtime::bank_forks::TrackedArcBank {
     let debug_keys = pubkeys_of(arg_matches, "debug_key")
         .map(|pubkeys| Arc::new(pubkeys.into_iter().collect::<HashSet<_>>()));
     let force_update_to_open = arg_matches.is_present("force_update_to_open");

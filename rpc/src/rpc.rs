@@ -206,7 +206,7 @@ pub struct JsonRpcRequestProcessor {
 impl Metadata for JsonRpcRequestProcessor {}
 
 impl JsonRpcRequestProcessor {
-    fn get_bank_with_config(&self, config: RpcContextConfig) -> Result<Arc<Bank>> {
+    fn get_bank_with_config(&self, config: RpcContextConfig) -> Result<solana_runtime::bank_forks::TrackedArcBank> {
         let RpcContextConfig {
             commitment,
             min_context_slot,
@@ -224,7 +224,7 @@ impl JsonRpcRequestProcessor {
     }
 
     #[allow(deprecated)]
-    fn bank(&self, commitment: Option<CommitmentConfig>) -> Arc<Bank> {
+    fn bank(&self, commitment: Option<CommitmentConfig>) -> solana_runtime::bank_forks::TrackedArcBank {
         debug!("RPC commitment_config: {:?}", commitment);
 
         let commitment = commitment.unwrap_or_default();
@@ -274,7 +274,7 @@ impl JsonRpcRequestProcessor {
             // the bank at the given slot was not included in the snapshot.
             // Also, it may occur after an old bank has been purged from BankForks and a new
             // BlockCommitmentCache has not yet arrived. To make this case impossible,
-            // BlockCommitmentCache should hold an `Arc<Bank>` everywhere it currently holds
+            // BlockCommitmentCache should hold an `solana_runtime::bank_forks::TrackedArcBank` everywhere it currently holds
             // a slot.
             //
             // For more information, see https://github.com/solana-labs/solana/issues/11078
@@ -338,13 +338,13 @@ impl JsonRpcRequestProcessor {
 
     // Useful for unit testing
     pub fn new_from_bank(
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         socket_addr_space: SocketAddrSpace,
         connection_cache: Arc<ConnectionCache>,
     ) -> Self {
         let genesis_hash = bank.hash();
         let bank_forks = Arc::new(RwLock::new(BankForks::new_from_banks(
-            &[bank.clone()],
+            &[bank.naughty_naughty()],
             bank.slot(),
         )));
         let blockstore = Arc::new(Blockstore::open(&get_tmp_ledger_path!()).unwrap());
@@ -4533,7 +4533,7 @@ pub fn create_validator_exit(exit: Arc<AtomicBool>) -> Arc<RwLock<Exit>> {
 
 pub fn create_test_transaction_entries(
     keypairs: Vec<&Keypair>,
-    bank: Arc<Bank>,
+    bank: solana_runtime::bank_forks::TrackedArcBank,
 ) -> (Vec<Entry>, Vec<Signature>) {
     let mint_keypair = keypairs[0];
     let keypair1 = keypairs[1];
@@ -4567,7 +4567,7 @@ pub fn create_test_transaction_entries(
 
 pub fn populate_blockstore_for_tests(
     entries: Vec<Entry>,
-    bank: Arc<Bank>,
+    bank: solana_runtime::bank_forks::TrackedArcBank,
     blockstore: Arc<Blockstore>,
     max_complete_transaction_status_slot: Arc<AtomicU64>,
 ) {
@@ -4993,7 +4993,7 @@ pub mod tests {
             }
         }
 
-        fn advance_bank_to_confirmed_slot(&self, slot: Slot) -> Arc<Bank> {
+        fn advance_bank_to_confirmed_slot(&self, slot: Slot) -> solana_runtime::bank_forks::TrackedArcBank {
             let parent_bank = self.working_bank();
             let bank = self
                 .bank_forks
@@ -5035,7 +5035,7 @@ pub mod tests {
             &self.meta.prioritization_fee_cache
         }
 
-        fn working_bank(&self) -> Arc<Bank> {
+        fn working_bank(&self) -> solana_runtime::bank_forks::TrackedArcBank {
             self.bank_forks.read().unwrap().working_bank()
         }
 

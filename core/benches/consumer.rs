@@ -84,12 +84,12 @@ fn create_consumer(poh_recorder: &RwLock<PohRecorder>) -> Consumer {
 }
 
 struct BenchFrame {
-    bank: Arc<Bank>,
+    bank: solana_runtime::bank_forks::TrackedArcBank,
     ledger_path: TempDir,
     exit: Arc<AtomicBool>,
     poh_recorder: Arc<RwLock<PohRecorder>>,
     poh_service: PohService,
-    signal_receiver: Receiver<(Arc<Bank>, (Entry, u64))>,
+    signal_receiver: Receiver<(solana_runtime::bank_forks::TrackedArcBank, (Entry, u64))>,
 }
 
 fn setup(apply_cost_tracker_during_replay: bool) -> BenchFrame {

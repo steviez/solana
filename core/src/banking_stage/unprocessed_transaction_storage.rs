@@ -318,7 +318,7 @@ impl UnprocessedTransactionStorage {
 
     pub fn filter_forwardable_packets_and_add_batches(
         &mut self,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         forward_packet_batches_by_accounts: &mut ForwardPacketBatchesByAccounts,
     ) -> FilterForwardingResults {
         match self {
@@ -341,7 +341,7 @@ impl UnprocessedTransactionStorage {
     #[must_use]
     pub fn process_packets<F>(
         &mut self,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         banking_stage_stats: &BankingStageStats,
         slot_metrics_tracker: &mut LeaderSlotMetricsTracker,
         processing_function: F,
@@ -414,7 +414,7 @@ impl VoteStorage {
 
     fn filter_forwardable_packets_and_add_batches(
         &mut self,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         forward_packet_batches_by_accounts: &mut ForwardPacketBatchesByAccounts,
     ) -> FilterForwardingResults {
         if matches!(self.vote_source, VoteSource::Tpu) {
@@ -432,7 +432,7 @@ impl VoteStorage {
     // returns `true` if the end of slot is reached
     fn process_packets<F>(
         &mut self,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         banking_stage_stats: &BankingStageStats,
         slot_metrics_tracker: &mut LeaderSlotMetricsTracker,
         mut processing_function: F,
@@ -548,7 +548,7 @@ impl ThreadLocalUnprocessedPackets {
     /// Added valid and sanitized packets to forwarding queue.
     fn filter_forwardable_packets_and_add_batches(
         &mut self,
-        bank: Arc<Bank>,
+        bank: solana_runtime::bank_forks::TrackedArcBank,
         forward_buffer: &mut ForwardPacketBatchesByAccounts,
     ) -> FilterForwardingResults {
         let mut total_forwardable_tracer_packets: usize = 0;

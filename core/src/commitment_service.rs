@@ -23,13 +23,13 @@ use {
 };
 
 pub struct CommitmentAggregationData {
-    bank: Arc<Bank>,
+    bank: solana_runtime::bank_forks::TrackedArcBank,
     root: Slot,
     total_stake: Stake,
 }
 
 impl CommitmentAggregationData {
-    pub fn new(bank: Arc<Bank>, root: Slot, total_stake: Stake) -> Self {
+    pub fn new(bank: solana_runtime::bank_forks::TrackedArcBank, root: Slot, total_stake: Stake) -> Self {
         Self {
             bank,
             root,

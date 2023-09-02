@@ -1662,7 +1662,7 @@ pub mod test {
         run_test_switch_threshold_duplicate_rollback(true);
     }
 
-    fn setup_switch_test(num_accounts: usize) -> (Arc<Bank>, VoteSimulator, u64) {
+    fn setup_switch_test(num_accounts: usize) -> (solana_runtime::bank_forks::TrackedArcBank, VoteSimulator, u64) {
         // Init state
         assert!(num_accounts > 1);
         let mut vote_simulator = VoteSimulator::new(num_accounts);
