@@ -1,7 +1,7 @@
 //! A wrapper around a root `Bank` that only loads from bank forks if the root has been updated.
 //! This can be useful to avoid read-locking the bank forks until the root has been updated.
 //!
-
+/*
 use {
     crate::{
         bank::Bank,
@@ -96,3 +96,4 @@ mod tests {
         }
     }
 }
+*/
