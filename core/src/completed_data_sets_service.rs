@@ -73,7 +73,7 @@ impl CompletedDataSetsService {
             } = completed_set_info;
             max_slot = max_slot.max(slot);
             match blockstore.get_entries_in_data_block(slot, start_index, end_index, None) {
-                Ok(entries) => {
+                Ok((entries, _, _)) => {
                     let transactions = Self::get_transaction_signatures(entries);
                     if !transactions.is_empty() {
                         rpc_subscriptions.notify_signatures_received((slot, transactions));

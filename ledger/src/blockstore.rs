@@ -70,7 +70,7 @@ use {
         path::{Path, PathBuf},
         rc::Rc,
         sync::{
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicBool, AtomicU64, Ordering},
             Arc, Mutex, RwLock, RwLockWriteGuard,
         },
     },
@@ -2886,12 +2886,20 @@ impl Blockstore {
             .last()
             .map(|(_, end_index)| u64::from(*end_index) - start_index + 1)
             .unwrap_or(0);
+        let num_ranges = completed_ranges.len();
 
-        let entries: Result<Vec<Vec<Entry>>> = if completed_ranges.len() <= 1 {
+        let fetch_time_us = AtomicU64::new(0);
+        let deserialize_time_us = AtomicU64::new(0);
+        let entries: Vec<Vec<Entry>> = if completed_ranges.len() <= 1 {
             completed_ranges
                 .into_iter()
                 .map(|(start_index, end_index)| {
-                    self.get_entries_in_data_block(slot, start_index, end_index, Some(&slot_meta))
+                    let (entries, fetch_time, deserialize_time) = self
+                        .get_entries_in_data_block(slot, start_index, end_index, Some(&slot_meta))
+                        .unwrap();
+                    fetch_time_us.fetch_add(fetch_time, Ordering::Relaxed);
+                    deserialize_time_us.fetch_add(deserialize_time, Ordering::Relaxed);
+                    entries
                 })
                 .collect()
         } else {
@@ -2899,17 +2907,36 @@ impl Blockstore {
                 completed_ranges
                     .into_par_iter()
                     .map(|(start_index, end_index)| {
-                        self.get_entries_in_data_block(
-                            slot,
-                            start_index,
-                            end_index,
-                            Some(&slot_meta),
-                        )
+                        let (entries, fetch_time, deserialize_time) = self
+                            .get_entries_in_data_block(
+                                slot,
+                                start_index,
+                                end_index,
+                                Some(&slot_meta),
+                            )
+                            .unwrap();
+                        fetch_time_us.fetch_add(fetch_time, Ordering::Relaxed);
+                        deserialize_time_us.fetch_add(deserialize_time, Ordering::Relaxed);
+                        entries
                     })
                     .collect()
             })
         };
-        let entries: Vec<Entry> = entries?.into_iter().flatten().collect();
+        datapoint_info!(
+            "blockstore_entry_fetch",
+            ("slot", slot, i64),
+            ("num_ranges", num_ranges, i64),
+            ("num_shreds", num_shreds, i64),
+            ("num_entries", entries.len(), i64),
+            ("fetch_time_us", fetch_time_us.load(Ordering::Relaxed), i64),
+            (
+                "deserialize_time_us",
+                deserialize_time_us.load(Ordering::Relaxed),
+                i64
+            ),
+        );
+
+        let entries: Vec<Entry> = entries.into_iter().flatten().collect();
         Ok((entries, num_shreds, slot_meta.is_full()))
     }
 
@@ -3002,18 +3029,21 @@ impl Blockstore {
         start_index: u32,
         end_index: u32,
         slot_meta: Option<&SlotMeta>,
-    ) -> Result<Vec<Entry>> {
+    ) -> Result<(Vec<Entry>, u64, u64)> {
         let keys: Vec<(Slot, u64)> = (start_index..=end_index)
             .map(|index| (slot, u64::from(index)))
             .collect();
 
+        let mut fetch = Measure::start("fetch");
         let data_shreds: Result<Vec<Option<Vec<u8>>>> = self
             .data_shred_cf
             .multi_get_bytes(keys)
             .into_iter()
             .collect();
         let data_shreds = data_shreds?;
+        fetch.stop();
 
+        let mut deserialize = Measure::start("deserialize");
         let data_shreds: Result<Vec<Shred>> =
             data_shreds
                 .into_iter()
@@ -3058,11 +3088,15 @@ impl Blockstore {
         })?;
 
         debug!("{:?} shreds in last FEC set", data_shreds.len(),);
-        bincode::deserialize::<Vec<Entry>>(&deshred_payload).map_err(|e| {
-            BlockstoreError::InvalidShredData(Box::new(bincode::ErrorKind::Custom(format!(
-                "could not reconstruct entries: {e:?}"
-            ))))
-        })
+        let entries = bincode::deserialize::<Vec<Entry>>(&deshred_payload)
+            .map_err(|e| {
+                BlockstoreError::InvalidShredData(Box::new(bincode::ErrorKind::Custom(format!(
+                    "could not reconstruct entries: {e:?}"
+                ))))
+            })
+            .unwrap();
+        deserialize.stop();
+        Ok((entries, fetch.as_us(), deserialize.as_us()))
     }
 
     fn get_any_valid_slot_entries(&self, slot: Slot, start_index: u64) -> Vec<Entry> {
@@ -3080,6 +3114,7 @@ impl Blockstore {
                 .map(|(start_index, end_index)| {
                     self.get_entries_in_data_block(slot, *start_index, *end_index, Some(&slot_meta))
                         .unwrap_or_default()
+                        .0
                 })
                 .collect()
         });
