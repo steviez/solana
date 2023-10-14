@@ -370,6 +370,8 @@ impl JsonRpcService {
         let health = Arc::new(RpcHealth::new(
             cluster_info.clone(),
             known_validators,
+            Arc::clone(&optimistically_confirmed_bank),
+            Arc::clone(&blockstore),
             config.health_check_slot_distance,
             override_health_check,
             startup_verification_complete,
