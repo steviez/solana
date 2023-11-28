@@ -2243,7 +2243,9 @@ impl Bank {
         //  crossed a boundary
         if self.epoch_stakes.get(&leader_schedule_epoch).is_none() {
             self.epoch_stakes.retain(|&epoch, _| {
-                epoch >= leader_schedule_epoch.saturating_sub(MAX_LEADER_SCHEDULE_STAKES)
+                // Use > to retain MAX_LEADER_SCHEDULE_STAKES - 1 old epochs,
+                // the new epoch will bring us to MAX_LEADER_SCHEDULE_STAKES
+                epoch > leader_schedule_epoch.saturating_sub(MAX_LEADER_SCHEDULE_STAKES)
             });
             let stakes = self.stakes_cache.stakes().clone();
             let stakes = Arc::new(StakesEnum::from(stakes));
