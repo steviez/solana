@@ -582,6 +582,26 @@ impl Blockstore {
         }))
     }
 
+    // This column is cleaned in a special way, this function doesn't consider
+    // that at all so don't allow use in production. A safer alternative is
+    // Blockstore::get_confirmed_signatures_for_address2()
+    #[cfg(feature = "dev-context-only-utils")]
+    pub fn signature_iterator(
+        &self,
+        slot: Slot,
+        address: Pubkey,
+    ) -> Result<impl Iterator<Item = (Slot, Signature)> + '_> {
+        let iter = self
+            .address_signatures_cf
+            .iter_current_index_filtered(IteratorMode::From(
+                (0, address, slot, Signature::default()),
+                IteratorDirection::Forward,
+            ))?;
+        Ok(iter
+            .take_while(move |((_, key_address, _, _), _)| *key_address == address)
+            .map(|((_, _, slot, signature), _)| (slot, signature)))
+    }
+
     /// Determines if we can iterate from `starting_slot` to >= `ending_slot` by full slots
     /// `starting_slot` is excluded from the `is_full()` check
     pub fn slot_range_connected(&self, starting_slot: Slot, ending_slot: Slot) -> bool {

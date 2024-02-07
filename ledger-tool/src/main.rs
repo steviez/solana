@@ -2168,6 +2168,21 @@ fn main() {
                            If no file name is specified, it will print the metadata of all ledger files.")
             )
         )
+        .subcommand(
+            SubCommand::with_name("signatures")
+                .about("Print all of the signatures for a specified address")
+                .arg(&starting_slot_arg)
+                .arg(&ending_slot_arg)
+                .arg(
+                    Arg::with_name("address")
+                        .index(1)
+                        .value_name("PUBKEY")
+                        .validator(is_pubkey)
+                        .takes_value(true)
+                        .required(true)
+                        .help("Address to get signatures for"),
+                ),
+        )
         .program_subcommand()
         .get_matches();
 
@@ -2463,6 +2478,35 @@ fn main() {
                         eprintln!("{err}");
                     }
                 }
+            }
+            ("signatures", Some(arg_matches)) => {
+                let address = value_t_or_exit!(arg_matches, "address", Pubkey);
+                let starting_slot = value_t_or_exit!(arg_matches, "starting_slot", Slot);
+                let ending_slot = value_t!(arg_matches, "ending_slot", Slot).unwrap_or(Slot::MAX);
+                let output_format = OutputFormat::from_matches(arg_matches, "output_format", false);
+
+                let blockstore = open_blockstore(
+                    &ledger_path,
+                    AccessType::Secondary,
+                    wal_recovery_mode,
+                    force_update_to_open,
+                    enforce_ulimit_nofile,
+                );
+                let signatures: Vec<_> = blockstore
+                    .signature_iterator(starting_slot, address)
+                    .unwrap()
+                    .take_while(|(slot, _)| *slot <= ending_slot)
+                    .map(|(slot, signature)| SlotSignature {
+                        slot,
+                        signature: signature.to_string(),
+                    })
+                    .collect();
+                let signatures = SlotSignatures {
+                    address,
+                    signatures,
+                };
+
+                println!("{}", output_format.formatted_string(&signatures));
             }
             ("json", Some(arg_matches)) => {
                 let starting_slot = value_t_or_exit!(arg_matches, "starting_slot", Slot);
