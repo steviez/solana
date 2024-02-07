@@ -326,6 +326,34 @@ impl EncodedConfirmedBlockWithEntries {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotSignatures {
+    #[serde(skip_serializing)]
+    pub address: Pubkey,
+    pub signatures: Vec<SlotSignature>,
+}
+
+impl QuietDisplay for SlotSignatures {}
+impl VerboseDisplay for SlotSignatures {}
+
+impl Display for SlotSignatures {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        writeln!(f, "Address: {}", self.address)?;
+        for SlotSignature { slot, signature } in self.signatures.iter() {
+            writeln!(f, "Slot: {slot}, Signature: {signature}")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotSignature {
+    pub slot: Slot,
+    pub signature: String,
+}
+
 pub fn output_slot_rewards(blockstore: &Blockstore, slot: Slot, method: &OutputFormat) {
     // Note: rewards are not output in JSON yet
     if *method == OutputFormat::Display {

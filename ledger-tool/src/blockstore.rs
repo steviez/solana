@@ -4,7 +4,7 @@ use {
     crate::{
         ledger_path::canonicalize_ledger_path,
         ledger_utils::{get_program_ids, get_shred_storage_type},
-        output::{output_ledger, output_slot, SlotBounds, SlotInfo},
+        output::{output_ledger, output_slot, SlotBounds, SlotInfo, SlotSignature, SlotSignatures},
     },
     chrono::{DateTime, Utc},
     clap::{
@@ -14,7 +14,10 @@ use {
     log::*,
     regex::Regex,
     serde_json::json,
-    solana_clap_utils::{hidden_unless_forced, input_validators::is_slot},
+    solana_clap_utils::{
+        hidden_unless_forced,
+        input_validators::{is_pubkey, is_slot},
+    },
     solana_cli_output::OutputFormat,
     solana_ledger::{
         ancestor_iterator::AncestorIterator,
@@ -26,6 +29,7 @@ use {
     solana_sdk::{
         clock::{Slot, UnixTimestamp},
         hash::Hash,
+        pubkey::Pubkey,
     },
     std::{
         collections::{BTreeMap, BTreeSet, HashMap},
@@ -582,6 +586,20 @@ pub fn blockstore_subcommands<'a, 'b>(hidden: bool) -> Vec<App<'a, 'b>> {
             .settings(&hidden)
             .arg(&starting_slot_arg)
             .arg(&ending_slot_arg),
+        SubCommand::with_name("signatures")
+            .about("Print all of the signatures for a specified address")
+            .settings(&hidden)
+            .arg(&starting_slot_arg)
+            .arg(&ending_slot_arg)
+            .arg(
+                Arg::with_name("address")
+                    .index(1)
+                    .value_name("PUBKEY")
+                    .validator(is_pubkey)
+                    .takes_value(true)
+                    .required(true)
+                    .help("Address to get signatures for"),
+            ),
         SubCommand::with_name("slot")
             .about("Print the contents of one or more slots")
             .settings(&hidden)
@@ -1062,6 +1080,30 @@ pub fn blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) 
                     }
                 }
             }
+        }
+        ("signatures", Some(arg_matches)) => {
+            let address = value_t_or_exit!(arg_matches, "address", Pubkey);
+            let starting_slot = value_t_or_exit!(arg_matches, "starting_slot", Slot);
+            let ending_slot = value_t!(arg_matches, "ending_slot", Slot).unwrap_or(Slot::MAX);
+            let output_format = OutputFormat::from_matches(arg_matches, "output_format", false);
+
+            let blockstore =
+                crate::open_blockstore(&ledger_path, arg_matches, AccessType::Secondary);
+            let signatures: Vec<_> = blockstore
+                .signature_iterator(starting_slot, address)
+                .unwrap()
+                .take_while(|(slot, _)| *slot <= ending_slot)
+                .map(|(slot, signature)| SlotSignature {
+                    slot,
+                    signature: signature.to_string(),
+                })
+                .collect();
+            let signatures = SlotSignatures {
+                address,
+                signatures,
+            };
+
+            println!("{}", output_format.formatted_string(&signatures));
         }
         ("slot", Some(arg_matches)) => {
             let slots = values_t_or_exit!(arg_matches, "slots", Slot);
