@@ -338,6 +338,12 @@ pub fn blockstore_subcommands<'a, 'b>(hidden: bool) -> Vec<App<'a, 'b>> {
                     .value_name("DIR")
                     .takes_value(true)
                     .help("Target db"),
+            )
+            .arg(
+                Arg::with_name("include_extras")
+                    .long("include-extras")
+                    .takes_value(false)
+                    .help("Copy the bank hashes and root column as well")
             ),
         SubCommand::with_name("dead-slots")
             .about("Print all the dead slots in the ledger")
@@ -672,6 +678,7 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
         ("copy", Some(arg_matches)) => {
             let starting_slot = value_t_or_exit!(arg_matches, "starting_slot", Slot);
             let ending_slot = value_t_or_exit!(arg_matches, "ending_slot", Slot);
+            let include_extras = arg_matches.is_present("include_extras");
             let target_db = PathBuf::from(value_t_or_exit!(arg_matches, "target_db", String));
 
             let source = crate::open_blockstore(&ledger_path, arg_matches, AccessType::Secondary);
@@ -698,6 +705,17 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
                 let shreds = source.get_data_shreds_for_slot(slot, 0)?;
                 if target.insert_shreds(shreds, None, true).is_err() {
                     warn!("error inserting shreds for slot {}", slot);
+                }
+                if include_extras {
+                    let is_root = source.is_root(slot);
+                    if is_root {
+                        target.set_roots([slot].iter())?;
+                    }
+
+                    let bank_hash = source.get_bank_hash(slot);
+                    if let Some(bank_hash) = bank_hash {
+                        target.insert_bank_hash(slot, bank_hash, is_root);
+                    }
                 }
             }
         }
