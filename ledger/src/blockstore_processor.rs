@@ -944,37 +944,37 @@ fn verify_ticks(
 
     if next_bank_tick_height > max_bank_tick_height {
         warn!("Too many entry ticks found in slot: {}", bank.slot());
-        return Err(BlockError::TooManyTicks);
-    }
-
-    if next_bank_tick_height < max_bank_tick_height && slot_full {
-        info!("Too few entry ticks found in slot: {}", bank.slot());
-        return Err(BlockError::TooFewTicks);
-    }
-
-    if next_bank_tick_height == max_bank_tick_height {
-        let has_trailing_entry = entries.last().map(|e| !e.is_tick()).unwrap_or_default();
-        if has_trailing_entry {
-            warn!("Slot: {} did not end with a tick entry", bank.slot());
-            return Err(BlockError::TrailingEntry);
+        Err(BlockError::TooManyTicks)
+    } else {
+        if next_bank_tick_height < max_bank_tick_height && slot_full {
+            info!("Too few entry ticks found in slot: {}", bank.slot());
+            Err(BlockError::TooFewTicks)
+        } else {
+            if next_bank_tick_height == max_bank_tick_height {
+                let has_trailing_entry = entries.last().map(|e| !e.is_tick()).unwrap_or_default();
+                if has_trailing_entry {
+                    warn!("Slot: {} did not end with a tick entry", bank.slot());
+                    Err(BlockError::TrailingEntry)
+                } else if !slot_full {
+                    warn!("Slot: {} was not marked full", bank.slot());
+                    Err(BlockError::InvalidLastTick)
+                } else {
+                    let hashes_per_tick = bank.hashes_per_tick().unwrap_or(0);
+                    if !entries.verify_tick_hash_count(tick_hash_count, hashes_per_tick) {
+                        warn!(
+                            "Tick with invalid number of hashes found in slot: {}",
+                            bank.slot()
+                        );
+                        Err(BlockError::InvalidTickHashCount)
+                    } else {
+                        Ok(())
+                    }
+                }
+            } else {
+                Ok(())
+            }
         }
-
-        if !slot_full {
-            warn!("Slot: {} was not marked full", bank.slot());
-            return Err(BlockError::InvalidLastTick);
-        }
     }
-
-    let hashes_per_tick = bank.hashes_per_tick().unwrap_or(0);
-    if !entries.verify_tick_hash_count(tick_hash_count, hashes_per_tick) {
-        warn!(
-            "Tick with invalid number of hashes found in slot: {}",
-            bank.slot()
-        );
-        return Err(BlockError::InvalidTickHashCount);
-    }
-
-    Ok(())
 }
 
 fn confirm_full_slot(
