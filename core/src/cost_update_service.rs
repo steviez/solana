@@ -35,13 +35,36 @@ impl CostUpdateService {
         self.thread_hdl.join()
     }
 
-    fn service_loop(_blockstore: Arc<Blockstore>, cost_update_receiver: CostUpdateReceiver) {
-        for cost_update in cost_update_receiver.iter() {
-            match cost_update {
-                CostUpdate::FrozenBank { bank } => {
-                    bank.read_cost_tracker().unwrap().report_stats(bank.slot());
+    fn service_loop(blockstore: Arc<Blockstore>, cost_update_receiver: CostUpdateReceiver) {
+        let sleep = std::time::Duration::from_millis(100);
+
+        use std::collections::HashMap;
+        let mut bank_cache: HashMap<u64, Arc<Bank>> = HashMap::default();
+        loop {
+            std::thread::sleep(sleep);
+            match cost_update_receiver.try_recv() {
+                Err(crossbeam_channel::TryRecvError::Disconnected) => return,
+                Err(crossbeam_channel::TryRecvError::Empty) => {
+                    continue;
                 }
-            }
+                Ok(CostUpdate::FrozenBank { bank }) => {
+                    bank_cache.insert(bank.slot(), bank);
+                }
+            };
+
+            let max_root = blockstore.max_root();
+            bank_cache.retain(|&slot, bank| {
+                // Keep anything newer than the max root
+                let retain = slot > max_root;
+                // If bank is <= max_root, we can know if it was rooted or not
+                if !retain {
+                    let is_root = blockstore.is_root(slot);
+                    bank.read_cost_tracker()
+                        .unwrap()
+                        .report_stats(bank.slot(), is_root);
+                }
+                retain
+            })
         }
     }
 }

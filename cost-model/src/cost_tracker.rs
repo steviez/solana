@@ -141,7 +141,7 @@ impl CostTracker {
         self.transaction_count
     }
 
-    pub fn report_stats(&self, bank_slot: Slot) {
+    pub fn report_stats(&self, bank_slot: Slot, is_root: bool) {
         // skip reporting if block is empty
         if self.transaction_count == 0 {
             return;
@@ -152,6 +152,7 @@ impl CostTracker {
         datapoint_info!(
             "cost_tracker_stats",
             ("bank_slot", bank_slot as i64, i64),
+            ("is_root", is_root as i64, i64),
             ("block_cost", self.block_cost as i64, i64),
             ("vote_cost", self.vote_cost as i64, i64),
             ("transaction_count", self.transaction_count as i64, i64),
