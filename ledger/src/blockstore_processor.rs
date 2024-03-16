@@ -190,24 +190,25 @@ pub fn execute_batch(
         .is_active(&feature_set::apply_cost_tracker_during_replay::id())
     // */
     {
-        let tx_costs_with_actual_execution_units: Vec<_> =
-        execution_results
+        let tx_costs_with_actual_execution_units: Vec<_> = execution_results
             .iter()
             .zip(batch.sanitized_transactions())
             .filter_map(|(execution_result, tx)| {
                 if let Some(details) = execution_result.details() {
                     let actual_cost = details.executed_units;
                     let mut tx_cost = CostModel::calculate_cost(tx, &bank.feature_set);
-                    let estimated_programs_execution_costs = tx_cost.programs_execution_cost(); 
+                    let estimated_programs_execution_costs = tx_cost.programs_execution_cost();
                     if actual_cost != estimated_programs_execution_costs {
                         match tx_cost {
-                            solana_cost_model::transaction_cost::TransactionCost::Transaction(ref mut usage_cost_details) => {
+                            solana_cost_model::transaction_cost::TransactionCost::Transaction(
+                                ref mut usage_cost_details,
+                            ) => {
                                 usage_cost_details.programs_execution_cost = actual_cost;
-                            },
-                            _ => { 
+                            }
+                            _ => {
                                 // Shouldn't need to adjust for sismple vote. Are there cases
                                 // during replay?
-                            },
+                            }
                         }
                     }
                     Some(tx_cost)
