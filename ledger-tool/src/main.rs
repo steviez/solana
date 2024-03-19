@@ -2675,10 +2675,11 @@ fn main() {
                     force_update_to_open,
                     enforce_ulimit_nofile,
                 );
+                let blockstore = Arc::new(blockstore);
                 let (bank_forks, ..) = load_and_process_ledger(
                     arg_matches,
                     &genesis_config,
-                    Arc::new(blockstore),
+                    blockstore.clone(),
                     process_options,
                     snapshot_archive_path,
                     incremental_snapshot_archive_path,
@@ -2687,6 +2688,181 @@ fn main() {
                     eprintln!("Ledger verification failed: {err:?}");
                     exit(1);
                 });
+
+                // START OF BANKING STAGE STUFF
+                use {
+                    crossbeam_channel::unbounded,
+                    solana_client::connection_cache::ConnectionCache,
+                    solana_core::{
+                        banking_stage::BankingStage, banking_trace::BankingTracer,
+                        validator::BlockProductionMethod,
+                    },
+                    solana_gossip::{cluster_info::ClusterInfo, contact_info::ContactInfo},
+                    solana_ledger::leader_schedule_cache::LeaderScheduleCache,
+                    solana_poh::poh_recorder::PohRecorder,
+                    solana_runtime::{
+                        prioritization_fee_cache::PrioritizationFeeCache,
+                    },
+                    solana_sdk::{
+                        poh_config::PohConfig, signature::Signer, signer::keypair::Keypair,
+                    },
+                    solana_streamer::{
+                        packet::{Packet, PacketBatch},
+                        socket::SocketAddrSpace,
+                    },
+                    std::{
+                        thread,
+                        time::{Instant},
+                    },
+                };
+
+                let parent_bank = bank_forks.read().unwrap().working_bank();
+                // TODO: this is pretty brittle
+                let slot = parent_bank.slot() + 1;
+
+                let keypair = Arc::new(Keypair::new());
+                let pubkey = keypair.pubkey();
+                let contact_info = ContactInfo::new_localhost(&pubkey, 0);
+                let cluster_info = Arc::new(ClusterInfo::new(
+                    contact_info,
+                    keypair,
+                    SocketAddrSpace::Unspecified,
+                ));
+
+                // Make the time per Bank large enough that automatic ticking will not occur;
+                // we'll handle the ticking ourselves
+                let mut bank = Bank::new_from_parent(parent_bank, &pubkey, slot);
+                bank.ns_per_slot = std::u128::MAX;
+                let bank = Arc::new(bank);
+
+                // Setup stuff to make a BankingStage
+                let block_production_method = BlockProductionMethod::ThreadLocalMultiIterator;
+
+                let poh_config = Arc::new(PohConfig {
+                    target_tick_duration: Duration::from_millis(1000),
+                    target_tick_count: None,
+                    hashes_per_tick: *bank.hashes_per_tick(),
+                });
+                let leader_schedule_cache = Arc::new(LeaderScheduleCache::new_from_bank(
+                    &bank_forks.read().unwrap().root_bank(),
+                ));
+                let (mut poh_recorder, _entry_receiver, record_receiver) = PohRecorder::new(
+                    bank.tick_height(),
+                    bank.last_blockhash(),
+                    bank.clone(),
+                    Some((4, 4)),
+                    bank.ticks_per_slot(),
+                    &pubkey,
+                    blockstore.clone(),
+                    &leader_schedule_cache,
+                    &poh_config,
+                    exit_signal.clone(),
+                );
+                poh_recorder.set_bank(bank.clone(), false);
+                let poh_recorder = Arc::new(RwLock::new(poh_recorder));
+                let (banking_tracer, _) = BankingTracer::new(None).unwrap();
+                let (non_vote_sender, non_vote_receiver) =
+                    banking_tracer.create_channel_non_vote();
+                let (tpu_vote_sender, tpu_vote_receiver) =
+                    banking_tracer.create_channel_tpu_vote();
+                let (gossip_vote_sender, gossip_vote_receiver) = unbounded();
+                let transaction_status_sender = None;
+                let (replay_vote_sender, _replay_vote_receiver) = unbounded();
+                let log_messages_bytes_limit = None;
+                let connection_cache =
+                    Arc::new(ConnectionCache::with_udp("connection_cache_tpu_udp", 4));
+                let prioritization_fee_cache = Arc::new(PrioritizationFeeCache::default());
+
+                let _banking_stage = BankingStage::new(
+                    block_production_method,
+                    &cluster_info,
+                    &poh_recorder,
+                    non_vote_receiver,
+                    tpu_vote_receiver,
+                    gossip_vote_receiver,
+                    transaction_status_sender,
+                    replay_vote_sender,
+                    log_messages_bytes_limit,
+                    connection_cache.clone(),
+                    bank_forks.clone(),
+                    &prioritization_fee_cache,
+                );
+
+                // Emulate the acknowledgement of records that is typically done by PohService
+                let exit_signal_record_handler = exit_signal.clone();
+                let poh_recorder_record_handler = poh_recorder.clone();
+                let poh_record_receiver_handle = thread::spawn(move || loop {
+                    if let Ok(mut record) = record_receiver.try_recv() {
+                        let mut poh_recorder_l = poh_recorder_record_handler.write().unwrap();
+
+                        let res = poh_recorder_l.record(
+                            record.slot,
+                            record.mixin,
+                            std::mem::take(&mut record.transactions),
+                        );
+
+                        let _send_res = record.sender.send(res);
+                    } else {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+
+                    if exit_signal_record_handler.load(Ordering::Relaxed) {
+                        break;
+                    }
+                });
+
+                // Parse out all the TX's from this block, and send over to BankingStage
+                let (entries, _num_shreds, slot_full) = blockstore
+                    .get_slot_entries_with_shred_info(slot, 0, false)
+                    .unwrap();
+                assert!(slot_full);
+
+                let (ticks, transactions): (Vec<_>, Vec<_>) =
+                    entries.iter().partition(|entry| entry.is_tick());
+
+                let mut num_txs = 0;
+                let packet_batches: Vec<_> = transactions
+                    .iter()
+                    .flat_map(|entry| entry.transactions.iter())
+                    .map(|tx| {
+                        num_txs += 1;
+                        let packet = Packet::from_data(None, tx).unwrap();
+                        Arc::new((vec![PacketBatch::new(vec![packet])], None))
+                    })
+                    .collect();
+
+                println!("Found {} transactions to send over", num_txs);
+
+                // TODO: ok to send votes and non-votes to same thread?
+                // Send individual tx's and wait for confirmation that the tx was executed
+                // to avoid BankingStage potentially altering the order
+                let mut num_observed_txs = 0;
+                for (i, packet_batch) in packet_batches.into_iter().enumerate() {
+                    info!("Sending tx {i} to BankingStage");
+                    non_vote_sender.send(packet_batch).unwrap();
+
+                    let now = Instant::now();
+                    while num_observed_txs <= i && now.elapsed().as_secs() < 5 {
+                        thread::sleep(Duration::from_millis(5));
+                        num_observed_txs = bank.executed_transaction_count() as usize;
+                    }
+                }
+
+                // Register all the ticks
+                for tick in ticks.iter() {
+                    bank.register_tick(&tick.hash);
+                }
+
+                // Freeze the bank and hope for the best
+                bank.freeze();
+                bank.read_cost_tracker().unwrap().report_stats(bank.slot());
+
+                // Drop everything so we shutdown
+                drop(tpu_vote_sender);
+                drop(non_vote_sender);
+                drop(gossip_vote_sender);
+
+
                 if print_accounts_stats {
                     let working_bank = bank_forks.read().unwrap().working_bank();
                     working_bank.print_accounts_stats();
