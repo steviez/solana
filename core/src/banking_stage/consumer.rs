@@ -480,6 +480,11 @@ impl Consumer {
             pre_results
         ));
 
+        let qos_len = transaction_qos_cost_results.len();
+        if qos_len != txs.len() {
+            error!("zzz QoS len {qos_len} does not match txs len {}", txs.len());
+        }
+
         // Only lock accounts for those transactions are selected for the block;
         // Once accounts are locked, other threads cannot encode transactions that will modify the
         // same account state
@@ -506,6 +511,13 @@ impl Consumer {
             ref commit_transactions_result,
             ..
         } = execute_and_commit_transactions_output;
+
+        if let Ok(commit_transactions) = commit_transactions_result {
+            let com_len = commit_transactions.len();
+            if qos_len != com_len {
+                error!("zzz Qos len {qos_len} does not match commit results len {com_len}");
+            }
+        }
 
         // Costs of all transactions are added to the cost_tracker before processing.
         // To ensure accurate tracking of compute units, transactions that ultimately
