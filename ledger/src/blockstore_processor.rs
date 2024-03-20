@@ -182,6 +182,43 @@ pub fn execute_batch(
         ..
     } = tx_results;
 
+    let tx_costs_with_actual_execution_units: Vec<_> = execution_results
+        .iter()
+        .zip(batch.sanitized_transactions())
+        .filter_map(|(execution_result, tx)| {
+            if let Some(details) = execution_result.details() {
+                let actual_cost = details.executed_units;
+                let mut tx_cost = CostModel::calculate_cost(tx, &bank.feature_set);
+                let estimated_programs_execution_costs = tx_cost.programs_execution_cost();
+                if actual_cost != estimated_programs_execution_costs {
+                    match tx_cost {
+                        solana_cost_model::transaction_cost::TransactionCost::Transaction(
+                            ref mut usage_cost_details,
+                        ) => {
+                            usage_cost_details.programs_execution_cost = actual_cost;
+                        }
+                        _ => {
+                            // Shouldn't need to adjust for sismple vote. Are there cases
+                            // during replay?
+                        }
+                    }
+                }
+                Some(tx_cost)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut cost_tracker = bank.write_cost_tracker().unwrap();
+    for tx_cost in &tx_costs_with_actual_execution_units {
+        let _ = cost_tracker
+            .try_add(tx_cost)
+            .inspect_err(|err| {
+                error!("Unable to add {:?} to cost_tracker: {:?}", tx_cost, err);
+            });
+    }
+
     let executed_transactions = execution_results
         .iter()
         .zip(batch.sanitized_transactions())
@@ -1609,6 +1646,7 @@ fn load_frozen_forks(
             // Block must be frozen by this point; otherwise,
             // process_single_slot() would have errored above.
             assert!(bank.is_frozen());
+            bank.read_cost_tracker().unwrap().report_stats(bank.slot());
             all_banks.insert(bank.slot(), bank.clone_with_scheduler());
             m.stop();
             process_single_slot_us += m.as_us();
