@@ -522,7 +522,8 @@ impl Consumer {
         // Costs of all transactions are added to the cost_tracker before processing.
         // To ensure accurate tracking of compute units, transactions that ultimately
         // were not included in the block should have their cost removed.
-        QosService::remove_costs(
+        self.qos_service.remove_costs(
+            txs.iter(),
             transaction_qos_cost_results.iter(),
             commit_transactions_result.as_ref().ok(),
             bank,
@@ -535,7 +536,8 @@ impl Consumer {
             .feature_set
             .is_active(&feature_set::apply_cost_tracker_during_replay::id())
         {
-            QosService::update_costs(
+            self.qos_service.update_costs(
+                txs.iter(),
                 transaction_qos_cost_results.iter(),
                 commit_transactions_result.as_ref().ok(),
                 bank,

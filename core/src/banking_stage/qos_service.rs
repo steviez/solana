@@ -99,25 +99,43 @@ impl QosService {
         let mut cost_tracking_time = Measure::start("cost_tracking_time");
         let mut cost_tracker = bank.write_cost_tracker().unwrap();
         let mut num_included = 0;
-        let select_results = transactions.zip(transactions_costs)
-            .map(|(tx, cost)| {
-                match cost {
-                    Ok(cost) => {
-                        match cost_tracker.try_add(&cost) {
-                            Ok(current_block_cost) => {
-                                debug!("slot {:?}, transaction {:?}, cost {:?}, fit into current block, current block cost {}", bank.slot(), tx, cost, current_block_cost);
-                                self.metrics.stats.selected_txs_count.fetch_add(1, Ordering::Relaxed);
-                                num_included += 1;
-                                Ok(cost)
-                            },
-                            Err(e) => {
-                                debug!("slot {:?}, transaction {:?}, cost {:?}, not fit into current block, '{:?}'", bank.slot(), tx, cost, e);
-                                Err(TransactionError::from(e))
-                            }
-                        }
-                    },
-                    Err(e) => Err(e),
-                }
+        let select_results = transactions
+            .zip(transactions_costs)
+            .map(|(tx, cost)| match cost {
+                Ok(cost) => match cost_tracker.try_add(&cost) {
+                    Ok(current_block_cost) => {
+                        error!(
+                            "id {} slot {} tx {} cost {} \
+                            programs_executed_cost {} current_block_cost {} \
+                            - add tx cost success",
+                            self.metrics.id,
+                            bank.slot(),
+                            tx.signature(),
+                            cost.sum(),
+                            cost.programs_execution_cost(),
+                            current_block_cost
+                        );
+                        self.metrics
+                            .stats
+                            .selected_txs_count
+                            .fetch_add(1, Ordering::Relaxed);
+                        num_included += 1;
+                        Ok(cost)
+                    }
+                    Err(e) => {
+                        error!(
+                            "id {} slot {} tx {} cost {} \
+                            - add tx cost fail: {:?}",
+                            self.metrics.id,
+                            bank.slot(),
+                            tx.signature(),
+                            cost.sum(),
+                            e,
+                        );
+                        Err(TransactionError::from(e))
+                    }
+                },
+                Err(e) => Err(e),
             })
             .collect();
         cost_tracker.add_transactions_in_flight(num_included);
@@ -133,12 +151,15 @@ impl QosService {
     /// Updates the transaction costs for committed transactions. Does not handle removing costs
     /// for transactions that didn't get recorded or committed
     pub fn update_costs<'a>(
+        &self,
+        transactions: impl Iterator<Item = &'a SanitizedTransaction>,
         transaction_cost_results: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
         transaction_committed_status: Option<&Vec<CommitTransactionDetails>>,
         bank: &Bank,
     ) {
         if let Some(transaction_committed_status) = transaction_committed_status {
-            Self::update_committed_transaction_costs(
+            self.update_committed_transaction_costs(
+                transactions,
                 transaction_cost_results,
                 transaction_committed_status,
                 bank,
@@ -148,77 +169,116 @@ impl QosService {
 
     /// Removes transaction costs from the cost tracker if not committed or recorded
     pub fn remove_costs<'a>(
+        &self,
+        transactions: impl Iterator<Item = &'a SanitizedTransaction>,
         transaction_cost_results: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
         transaction_committed_status: Option<&Vec<CommitTransactionDetails>>,
         bank: &Bank,
     ) {
         match transaction_committed_status {
-            Some(transaction_committed_status) => Self::remove_uncommitted_transaction_costs(
+            Some(transaction_committed_status) => self.remove_uncommitted_transaction_costs(
+                transactions,
                 transaction_cost_results,
                 transaction_committed_status,
                 bank,
             ),
-            None => Self::remove_transaction_costs(transaction_cost_results, bank),
+            None => self.remove_transaction_costs(transactions, transaction_cost_results, bank),
         }
     }
 
     fn remove_uncommitted_transaction_costs<'a>(
+        &self,
+        transactions: impl Iterator<Item = &'a SanitizedTransaction>,
         transaction_cost_results: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
         transaction_committed_status: &Vec<CommitTransactionDetails>,
         bank: &Bank,
     ) {
         let mut cost_tracker = bank.write_cost_tracker().unwrap();
         let mut num_included = 0;
-        transaction_cost_results
-            .zip(transaction_committed_status)
-            .for_each(|(tx_cost, transaction_committed_details)| {
-                // Only transactions that the qos service included have to be
-                // checked for update
-                if let Ok(tx_cost) = tx_cost {
-                    num_included += 1;
-                    if *transaction_committed_details == CommitTransactionDetails::NotCommitted {
-                        cost_tracker.remove(tx_cost)
-                    }
+        for (tx, tx_cost, transaction_committed_details) in itertools::izip!(
+            transactions,
+            transaction_cost_results,
+            transaction_committed_status
+        ) {
+            // Only transactions that the qos service included have to be
+            // checked for update
+            if let Ok(tx_cost) = tx_cost {
+                num_included += 1;
+                if *transaction_committed_details == CommitTransactionDetails::NotCommitted {
+                    error!(
+                        "id {} slot {} tx {} cost {} \
+                        - remove uncommitted tx cost",
+                        self.metrics.id,
+                        bank.slot(),
+                        tx.signature(),
+                        tx_cost.sum()
+                    );
+                    cost_tracker.remove(tx_cost)
                 }
-            });
+            }
+        }
         cost_tracker.sub_transactions_in_flight(num_included);
     }
 
     fn update_committed_transaction_costs<'a>(
+        &self,
+        transactions: impl Iterator<Item = &'a SanitizedTransaction>,
         transaction_cost_results: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
         transaction_committed_status: &Vec<CommitTransactionDetails>,
         bank: &Bank,
     ) {
         let mut cost_tracker = bank.write_cost_tracker().unwrap();
-        transaction_cost_results
-            .zip(transaction_committed_status)
-            .for_each(|(tx_cost, transaction_committed_details)| {
-                // Only transactions that the qos service included have to be
-                // checked for update
-                if let Ok(tx_cost) = tx_cost {
-                    if let CommitTransactionDetails::Committed { compute_units } =
-                        transaction_committed_details
-                    {
-                        cost_tracker.update_execution_cost(tx_cost, *compute_units)
-                    }
+        for (tx, tx_cost, transaction_committed_details) in itertools::izip!(
+            transactions,
+            transaction_cost_results,
+            transaction_committed_status
+        ) {
+            // Only transactions that the qos service included have to be
+            // checked for update
+            if let Ok(tx_cost) = tx_cost {
+                if let CommitTransactionDetails::Committed { compute_units } =
+                    transaction_committed_details
+                {
+                    error!(
+                        "id {} slot {} tx {} cost {} \
+                        - update committed tx cost",
+                        self.metrics.id,
+                        bank.slot(),
+                        tx.signature(),
+                        *compute_units,
+                    );
+                    cost_tracker.update_execution_cost(tx_cost, *compute_units)
                 }
-            });
+            }
+        }
     }
 
     fn remove_transaction_costs<'a>(
+        &self,
+        transactions: impl Iterator<Item = &'a SanitizedTransaction>,
         transaction_cost_results: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
         bank: &Bank,
     ) {
         let mut cost_tracker = bank.write_cost_tracker().unwrap();
         let mut num_included = 0;
-        transaction_cost_results.for_each(|tx_cost| {
-            // Only transactions that the qos service included have to be
-            // removed
-            if let Ok(tx_cost) = tx_cost {
-                num_included += 1;
-                cost_tracker.remove(tx_cost);
-            }
-        });
+        transactions
+            .zip(transaction_cost_results)
+            .for_each(|(tx, tx_cost)| {
+                // Only transactions that the qos service included have to be
+                // removed
+                if let Ok(tx_cost) = tx_cost {
+                    num_included += 1;
+                    error!(
+                        "id {} slot {} tx {} cost {} \
+                        - remove tx cost",
+                        self.metrics.id,
+                        bank.slot(),
+                        tx.signature(),
+                        tx_cost.sum()
+                    );
+                    cost_tracker.remove(tx_cost);
+                }
+            });
         cost_tracker.sub_transactions_in_flight(num_included);
     }
 
