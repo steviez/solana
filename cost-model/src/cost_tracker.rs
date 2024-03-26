@@ -61,7 +61,9 @@ pub struct CostTracker {
     transaction_signature_count: u64,
     secp256k1_instruction_signature_count: u64,
     ed25519_instruction_signature_count: u64,
-
+    /// The number of transactions that have had their estimated cost added to
+    /// the tracker, but are still waiting for an update with actual usage or
+    /// removal if the transaction does not end up getting committed.
     in_flight_transaction_count: usize,
 }
 
@@ -192,6 +194,11 @@ impl CostTracker {
             (
                 "ed25519_instruction_signature_count",
                 self.ed25519_instruction_signature_count,
+                i64
+            ),
+            (
+                "inflight_transaction_count",
+                self.in_flight_transaction_count,
                 i64
             ),
         );
