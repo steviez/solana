@@ -7,6 +7,7 @@ use {
     std::{
         sync::Arc,
         thread::{self, Builder, JoinHandle},
+        time::Duration,
     },
 };
 pub enum CostUpdate {
@@ -18,6 +19,12 @@ pub type CostUpdateReceiver = Receiver<CostUpdate>;
 pub struct CostUpdateService {
     thread_hdl: JoinHandle<()>,
 }
+
+// The maximum number of retries to check if CostTracker::in_flight_transaction_count() has settled
+// to zero. Bail out after this many retries; the in-flight count is reported so this is ok
+const MAX_LOOP_COUNT: usize = 25;
+// Throttle checking the count
+const LOOP_LIMITER: Duration = Duration::from_millis(10);
 
 impl CostUpdateService {
     pub fn new(blockstore: Arc<Blockstore>, cost_update_receiver: CostUpdateReceiver) -> Self {
@@ -39,21 +46,21 @@ impl CostUpdateService {
         for cost_update in cost_update_receiver.iter() {
             match cost_update {
                 CostUpdate::FrozenBank { bank } => {
-                    let mut loop_count = 0;
-                    loop {
-                        loop_count += 1;
-                        let cost_tracker = bank.read_cost_tracker().unwrap();
-                        if cost_tracker.in_flight_transaction_count() == 0 {
-                            break;
-                        }
-                        if loop_count >= 100 {
-                            warn!("in_flight_transaction_count ({}) did not reach 0 before reaching timeout for slot {}",
-                                cost_tracker.in_flight_transaction_count(), bank.slot());
+                    for loop_count in 0..MAX_LOOP_COUNT {
+                        // Release the lock so that the thread that will update
+                        // the count is able to obtain a write lock
+                        let in_flight_transaction_count = bank
+                            .read_cost_tracker()
+                            .unwrap()
+                            .in_flight_transaction_count();
+                        if in_flight_transaction_count == 0 {
+                            let slot = bank.slot();
+                            trace!("inflight transaction count for slot {slot} settled to zero \
+                                after {loop_count} iterations");
                             break;
                         }
 
-                        std::thread::sleep(std::time::Duration::from_millis(5));
-                        continue;
+                        std::thread::sleep(LOOP_LIMITER);
                     }
 
                     let cost_tracker = bank.read_cost_tracker().unwrap();
