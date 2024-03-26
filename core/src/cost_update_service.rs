@@ -55,8 +55,10 @@ impl CostUpdateService {
                             .in_flight_transaction_count();
                         if in_flight_transaction_count == 0 {
                             let slot = bank.slot();
-                            trace!("inflight transaction count for slot {slot} settled to zero \
-                                after {loop_count} iterations");
+                            trace!(
+                                "inflight transaction count for slot {slot} settled to zero \
+                                after {loop_count} iterations"
+                            );
                             break;
                         }
 
