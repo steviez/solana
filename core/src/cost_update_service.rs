@@ -62,6 +62,7 @@ impl CostUpdateService {
                                     "inflight transaction count is {in_flight_transaction_count} \
                                     for slot {slot} after {loop_count} iteration(s)"
                                 );
+                                cost_tracker.report_stats(slot);
                                 break;
                             }
                         }
