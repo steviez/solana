@@ -1,5 +1,6 @@
 use {
     crossbeam_channel::{Receiver, RecvTimeoutError, SendError, Sender},
+    histogram::Histogram,
     rayon::{prelude::*, ThreadPool, ThreadPoolBuilder},
     solana_gossip::cluster_info::ClusterInfo,
     solana_ledger::{
@@ -99,7 +100,11 @@ fn run_shred_sigverify<const K: usize>(
     let now = Instant::now();
     stats.num_iters += 1;
     stats.num_packets += packets.iter().map(PacketBatch::len).sum::<usize>();
-    stats.num_discards_pre += count_discards(&packets);
+    count_discards_and_accumulate_packet_age(
+        &packets,
+        &mut stats.num_discards_pre,
+        &mut stats.pre_packet_age,
+    );
     stats.num_duplicates += thread_pool.install(|| {
         packets
             .par_iter_mut()
@@ -122,7 +127,11 @@ fn run_shred_sigverify<const K: usize>(
         recycler_cache,
         &mut packets,
     );
-    stats.num_discards_post += count_discards(&packets);
+    count_discards_and_accumulate_packet_age(
+        &packets,
+        &mut stats.num_discards_post,
+        &mut stats.post_packet_age,
+    );
     // Exclude repair packets from retransmit.
     let shreds: Vec<_> = packets
         .iter()
@@ -192,12 +201,23 @@ fn get_slot_leaders(
     leaders
 }
 
-fn count_discards(packets: &[PacketBatch]) -> usize {
+fn count_discards_and_accumulate_packet_age(
+    packets: &[PacketBatch],
+    num_discards: &mut usize,
+    age_histogram: &mut Histogram,
+) {
+    // Take now() here once to avoid repeated calls to get time and so that all
+    // packets are treated as arriving at the same time regardless of their
+    // ordering within `packets`
+    let now = std::time::Instant::now();
     packets
         .iter()
         .flat_map(PacketBatch::iter)
         .filter(|packet| packet.meta().discard())
-        .count()
+        .for_each(|packet| {
+            *num_discards += 1;
+            let _ = age_histogram.increment(packet.meta().age_at(now).as_micros() as u64);
+        });
 }
 
 impl From<RecvTimeoutError> for Error {
@@ -221,7 +241,9 @@ struct ShredSigVerifyStats {
     num_packets: usize,
     num_deduper_saturations: usize,
     num_discards_post: usize,
+    post_packet_age: Histogram,
     num_discards_pre: usize,
+    pre_packet_age: Histogram,
     num_duplicates: usize,
     num_retransmit_shreds: usize,
     elapsed_micros: u64,
@@ -236,8 +258,10 @@ impl ShredSigVerifyStats {
             num_iters: 0usize,
             num_packets: 0usize,
             num_discards_pre: 0usize,
+            pre_packet_age: Histogram::new(),
             num_deduper_saturations: 0usize,
             num_discards_post: 0usize,
+            post_packet_age: Histogram::new(),
             num_duplicates: 0usize,
             num_retransmit_shreds: 0usize,
             elapsed_micros: 0u64,
@@ -258,6 +282,46 @@ impl ShredSigVerifyStats {
             ("num_duplicates", self.num_duplicates, i64),
             ("num_retransmit_shreds", self.num_retransmit_shreds, i64),
             ("elapsed_micros", self.elapsed_micros, i64),
+            (
+                "pre_packet_age_us_min",
+                self.pre_packet_age.minimum().unwrap_or(0),
+                i64
+            ),
+            (
+                "pre_packet_age_us_max",
+                self.pre_packet_age.maximum().unwrap_or(0),
+                i64
+            ),
+            (
+                "pre_packet_age_us_mean",
+                self.pre_packet_age.mean().unwrap_or(0),
+                i64
+            ),
+            (
+                "pre_packet_age_us_90pct",
+                self.pre_packet_age.percentile(90.0).unwrap_or(0),
+                i64
+            ),
+            (
+                "post_packet_age_us_min",
+                self.post_packet_age.minimum().unwrap_or(0),
+                i64
+            ),
+            (
+                "post_packet_age_us_max",
+                self.post_packet_age.maximum().unwrap_or(0),
+                i64
+            ),
+            (
+                "post_packet_age_us_mean",
+                self.post_packet_age.mean().unwrap_or(0),
+                i64
+            ),
+            (
+                "post_packet_age_us_90pct",
+                self.post_packet_age.percentile(90.0).unwrap_or(0),
+                i64
+            ),
         );
         *self = Self::new(Instant::now());
     }
