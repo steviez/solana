@@ -9,6 +9,7 @@ use {
         fmt, io,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         slice::SliceIndex,
+        time::{Duration, Instant},
     },
 };
 
@@ -38,6 +39,28 @@ bitflags! {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Wrapper for std::time::Instant so we can implement Default trait
+pub struct Timestamp(Instant);
+
+impl From<Instant> for Timestamp {
+    fn from(instant: Instant) -> Self {
+        Self(instant)
+    }
+}
+
+impl Default for Timestamp {
+    fn default() -> Self {
+        Self::now()
+    }
+}
+
+impl Timestamp {
+    pub fn now() -> Self {
+        Self::from(Instant::now())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, AbiExample)]
 #[repr(C)]
 pub struct Meta {
@@ -45,6 +68,9 @@ pub struct Meta {
     pub addr: IpAddr,
     pub port: u16,
     pub flags: PacketFlags,
+    // TODO: This struct / Packet are serde for BankingTrace
+    #[serde(skip_deserializing, skip_serializing)]
+    pub creation: Timestamp,
 }
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
@@ -278,6 +304,16 @@ impl Meta {
     pub fn round_compute_unit_price(&self) -> bool {
         self.flags.contains(PacketFlags::ROUND_COMPUTE_UNIT_PRICE)
     }
+
+    #[inline]
+    pub fn age_at(&self, instant: Instant) -> Duration {
+        instant.saturating_duration_since(self.creation.0)
+    }
+
+    #[inline]
+    pub fn set_creation_time(&mut self, timestamp: &Timestamp) {
+        self.creation = *timestamp
+    }
 }
 
 impl Default for Meta {
@@ -287,6 +323,7 @@ impl Default for Meta {
             addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             port: 0,
             flags: PacketFlags::empty(),
+            creation: Timestamp::default(),
         }
     }
 }

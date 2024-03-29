@@ -350,6 +350,7 @@ fn receive_quic_datagrams(
             std::iter::repeat_with(|| turbine_quic_endpoint_receiver.recv_deadline(deadline).ok())
                 .while_some(),
         );
+        let now = Instant::now().into();
         let size = entries
             .filter(|(_, _, bytes)| bytes.len() <= PACKET_DATA_SIZE)
             .zip(packet_batch.iter_mut())
@@ -359,6 +360,7 @@ fn receive_quic_datagrams(
                     addr: addr.ip(),
                     port: addr.port(),
                     flags: PacketFlags::empty(),
+                    creation: now,
                 };
                 packet.buffer_mut()[..bytes.len()].copy_from_slice(&bytes);
             })
@@ -395,6 +397,7 @@ pub(crate) fn receive_repair_quic_packets(
             std::iter::repeat_with(|| repair_quic_endpoint_receiver.recv_deadline(deadline).ok())
                 .while_some(),
         );
+        let now = Instant::now().into();
         let size = entries
             .filter(|(_, bytes)| bytes.len() <= PACKET_DATA_SIZE)
             .zip(packet_batch.iter_mut())
@@ -404,6 +407,7 @@ pub(crate) fn receive_repair_quic_packets(
                     addr: addr.ip(),
                     port: addr.port(),
                     flags: PacketFlags::REPAIR,
+                    creation: now,
                 };
                 packet.buffer_mut()[..bytes.len()].copy_from_slice(&bytes);
             })
