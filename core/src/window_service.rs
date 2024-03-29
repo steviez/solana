@@ -18,6 +18,7 @@ use {
         result::{Error, Result},
     },
     crossbeam_channel::{unbounded, Receiver, RecvTimeoutError, Sender},
+    histogram::Histogram,
     rayon::{prelude::*, ThreadPool},
     solana_gossip::cluster_info::ClusterInfo,
     solana_ledger::{
@@ -57,6 +58,7 @@ pub(crate) type DuplicateSlotReceiver = Receiver<Slot>;
 struct WindowServiceMetrics {
     run_insert_count: u64,
     num_packets: usize,
+    packet_age: Histogram,
     num_repairs: usize,
     num_shreds_received: usize,
     handle_packets_elapsed_us: u64,
@@ -83,6 +85,26 @@ impl WindowServiceMetrics {
             ),
             ("run_insert_count", self.run_insert_count as i64, i64),
             ("num_packets", self.num_packets, i64),
+            (
+                "packet_age_us_min",
+                self.packet_age.minimum().unwrap_or(0),
+                i64
+            ),
+            (
+                "packet_age_us_max",
+                self.packet_age.maximum().unwrap_or(0),
+                i64
+            ),
+            (
+                "packet_age_us_mean",
+                self.packet_age.mean().unwrap_or(0),
+                i64
+            ),
+            (
+                "packet_age_us_90pct",
+                self.packet_age.percentile(90.0).unwrap_or(0),
+                i64
+            ),
             ("num_repairs", self.num_repairs, i64),
             ("num_shreds_received", self.num_shreds_received, i64),
             (
@@ -329,8 +351,12 @@ where
     ws_metrics.num_packets += packets.iter().map(PacketBatch::len).sum::<usize>();
     ws_metrics.num_repairs += repair_infos.iter().filter(|r| r.is_some()).count();
     ws_metrics.num_shreds_received += shreds.len();
+    let now = std::time::Instant::now();
     for packet in packets.iter().flat_map(PacketBatch::iter) {
         let addr = packet.meta().socket_addr();
+        let _ = ws_metrics
+            .packet_age
+            .increment(packet.meta().age_at(now).as_micros() as u64);
         *ws_metrics.addrs.entry(addr).or_default() += 1;
     }
 
