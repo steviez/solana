@@ -125,8 +125,11 @@ pub fn recv_mmsg(sock: &UdpSocket, packets: &mut [Packet]) -> io::Result</*num p
     } else {
         usize::try_from(nrecv).unwrap()
     };
+    // TODO: come back and do this for non-Linux recv_mmsg() as well
+    let timestamp = solana_sdk::packet::Timestamp::now();
     for (addr, hdr, pkt) in izip!(addrs, hdrs, packets.iter_mut()).take(nrecv) {
         pkt.meta_mut().size = hdr.msg_len as usize;
+        pkt.meta_mut().set_creation_time(&timestamp);
         if let Some(addr) = cast_socket_addr(&addr, &hdr) {
             pkt.meta_mut().set_socket_addr(&addr);
         }
