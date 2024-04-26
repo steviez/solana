@@ -1041,6 +1041,36 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
             let blockstore =
                 crate::open_blockstore(&ledger_path, arg_matches, AccessType::Secondary);
             for slot in slots {
+                let shreds: Vec<_> = blockstore
+                    .slot_data_iterator(slot, 0)
+                    .unwrap()
+                    .map(|(_, bytes)| bytes.to_vec())
+                    .collect();
+                let num_shreds = shreds.len();
+                let packet_batch = solana_streamer::packet::to_packet_batches(&shreds, num_shreds);
+
+                let threadpool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(8)
+                    .thread_name(|i| format!("solSigVerShrd{i:02}"))
+                    .build()
+                    .expect("new rayon threadpool");
+                let leader = solana_sdk::pubkey!("dv4ACNkpYPcE3aKmYDqZm9G5EB3J4MRoeE7WNDRBVJB");
+                let slot_leaders: HashMap<Slot, solana_sdk::pubkey::Pubkey> =
+                    HashMap::from_iter([(slot, leader)]);
+                let cache =
+                    std::sync::RwLock::new(solana_ledger::sigverify_shreds::LruCache::new(1 << 18));
+
+                let result = solana_ledger::sigverify_shreds::verify_shreds_gpu(
+                    &threadpool,
+                    &packet_batch,
+                    &slot_leaders,
+                    &solana_perf::recycler_cache::RecyclerCache::default(),
+                    &cache,
+                );
+
+                println!("{:?}", result);
+                std::process::exit(0);
+                /*
                 println!("Slot {slot}");
                 if let Err(err) = output_slot(
                     &blockstore,
@@ -1052,6 +1082,7 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
                 ) {
                     eprintln!("{err}");
                 }
+                */
             }
         }
         _ => unreachable!(),

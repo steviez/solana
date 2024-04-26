@@ -171,6 +171,7 @@ dependencies = [
  "solana-ledger",
  "solana-logger",
  "solana-measure",
+ "solana-perf",
  "solana-program-runtime",
  "solana-rpc",
  "solana-runtime",
