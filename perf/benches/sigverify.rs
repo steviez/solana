@@ -10,7 +10,10 @@ use {
         recycler::Recycler,
         sigverify,
         test_tx::{test_multisig_tx, test_tx},
+        threadpool::ThreadPool,
     },
+    solana_rayon_threadlimit::get_thread_count,
+    std::num::NonZeroUsize,
     test::Bencher,
 };
 
@@ -113,7 +116,6 @@ fn bench_sigverify_high_packets_small_batch(bencher: &mut Bencher) {
 }
 
 #[bench]
-#[ignore]
 fn bench_sigverify_high_packets_large_batch(bencher: &mut Bencher) {
     let num_packets = sigverify::VERIFY_PACKET_CHUNK_SIZE * 32;
     let mut batches = gen_batches(false, LARGE_BATCH_PACKET_COUNT, num_packets);
@@ -122,6 +124,22 @@ fn bench_sigverify_high_packets_large_batch(bencher: &mut Bencher) {
     // verify packets
     bencher.iter(|| {
         sigverify::ed25519_verify(&mut batches, &recycler, &recycler_out, false, num_packets);
+    })
+}
+
+#[bench]
+fn bench_sigverify_high_packets_large_batch_new_tpool(bencher: &mut Bencher) {
+    let num_packets = sigverify::VERIFY_PACKET_CHUNK_SIZE * 32;
+    let mut batches = gen_batches(false, LARGE_BATCH_PACKET_COUNT, num_packets);
+
+    let name = "solIceMan";
+    let num_threads = NonZeroUsize::new(get_thread_count()).unwrap();
+    let reject_non_vote = false;
+    let threadpool = ThreadPool::new(name, num_threads, reject_non_vote);
+
+    // verify packets
+    bencher.iter(|| {
+        threadpool.do_work(&mut batches);
     })
 }
 
