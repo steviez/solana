@@ -9,8 +9,9 @@ use solana_frozen_abi_macro::AbiExample;
 use {
     bitflags::bitflags,
     std::{
-        fmt,
+        fmt, io, mem,
         net::{IpAddr, Ipv4Addr, SocketAddr},
+        ptr,
         slice::SliceIndex,
     },
 };
@@ -159,6 +160,37 @@ impl Packet {
     }
 
     #[cfg(feature = "bincode")]
+    /// Initializes a std::mem::MaybeUninit<Packet> such that the Packet can
+    /// be safely extracted via methods such as MaybeUninit::assume_init()
+    pub fn init_packet<T: serde::Serialize>(
+        packet: &mut mem::MaybeUninit<Packet>,
+        data: &T,
+        addr: Option<&SocketAddr>,
+    ) -> Result<()> {
+        let mut writer = PacketWriter::new_from_uninit_packet(packet);
+        bincode::serialize_into(&mut writer, data)?;
+
+        let serialized_size = writer.position();
+        let (ip, port) = if let Some(addr) = addr {
+            (addr.ip(), addr.port())
+        } else {
+            (IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+        };
+        // SAFETY: Access the field by pointer as creating a reference to
+        // and/or within the uninitialized Packet is undefined behavior
+        unsafe {
+            ptr::addr_of_mut!((*packet.as_mut_ptr()).meta).write(Meta {
+                size: serialized_size,
+                addr: ip,
+                port,
+                flags: PacketFlags::empty(),
+            });
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "bincode")]
     pub fn from_data<T: serde::Serialize>(dest: Option<&SocketAddr>, data: T) -> Result<Self> {
         let mut packet = Self::default();
         Self::populate_packet(&mut packet, dest, &data)?;
@@ -221,6 +253,61 @@ impl Default for Packet {
 impl PartialEq for Packet {
     fn eq(&self, other: &Self) -> bool {
         self.meta() == other.meta() && self.data(..) == other.data(..)
+    }
+}
+
+/// A custom implementation of io::Write to facilitate safe (non-UB)
+/// initialization of a MaybeUninit<Packet>
+struct PacketWriter {
+    // A pointer to the current write position
+    position: *mut u8,
+    // The number of remaining bytes that can be written to
+    spare_capacity: usize,
+}
+
+impl PacketWriter {
+    fn new_from_uninit_packet(packet: &mut mem::MaybeUninit<Packet>) -> Self {
+        // SAFETY: Access the field by pointer as creating a reference to
+        // and/or within the uninitialized Packet is undefined behavior
+        let position = unsafe { ptr::addr_of_mut!((*packet.as_mut_ptr()).buffer) as *mut u8 };
+        let spare_capacity = PACKET_DATA_SIZE;
+
+        Self {
+            position,
+            spare_capacity,
+        }
+    }
+
+    /// The offset of the write pointer within the buffer, which is also the
+    /// number of bytes that have been written
+    fn position(&self) -> usize {
+        PACKET_DATA_SIZE - self.spare_capacity
+    }
+}
+
+impl io::Write for PacketWriter {
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if buf.len() > self.spare_capacity {
+            return Err(io::Error::from(io::ErrorKind::WriteZero));
+        }
+
+        // SAFETY: We previously verifed that buf.len() <= self.spare_capacity
+        // so this write will not push us past the end of the buffer
+        unsafe {
+            ptr::copy(buf.as_ptr(), self.position, buf.len());
+            // Update position and spare_capacity for the next call to write()
+            self.position = self.position.add(buf.len());
+            // Unchecked math since we know buf.len() <= spare_capacity
+            self.spare_capacity -= buf.len();
+        }
+
+        Ok(buf.len())
+    }
+
+    #[inline]
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -309,7 +396,7 @@ impl Default for Meta {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {super::*, std::io::Write};
 
     #[test]
     fn test_deserialize_slice() {
@@ -348,5 +435,36 @@ mod tests {
                 .map_err(|e| e.to_string()),
             Err("the size limit has been reached".to_string()),
         );
+    }
+
+    #[test]
+    fn test_packet_buffer_writer() {
+        let mut packet = mem::MaybeUninit::<Packet>::uninit();
+        let mut writer = PacketWriter::new_from_uninit_packet(&mut packet);
+        let total_capacity = writer.spare_capacity;
+        assert_eq!(total_capacity, PACKET_DATA_SIZE);
+        let payload: [u8; PACKET_DATA_SIZE] = std::array::from_fn(|i| i as u8 % 255);
+
+        // Write 1200 bytes (1200 total)
+        let num_to_write = PACKET_DATA_SIZE - 32;
+        assert_eq!(
+            num_to_write,
+            writer.write(&payload[..num_to_write]).unwrap()
+        );
+        assert_eq!(num_to_write, writer.position());
+        // Write 28 bytes (1228 total)
+        assert_eq!(28, writer.write(&payload[1200..1200 + 28]).unwrap());
+        assert_eq!(1200 + 28, writer.position());
+        // Attempt to write 5 bytes (1233 total) which exceeds buffer capacity
+        assert!(writer
+            .write(&payload[1200 + 28 - 1..PACKET_DATA_SIZE])
+            .is_err());
+        // writer.position() remains unchanged
+        assert_eq!(1200 + 28, writer.position());
+        // Write 4 bytes (1232 total) to fill buffer
+        assert_eq!(4, writer.write(&payload[1200 + 28..]).unwrap());
+        assert_eq!(PACKET_DATA_SIZE, writer.position());
+        // Writing any amount of bytes will fail on the already full buffer
+        assert!(writer.write(&[0]).is_err());
     }
 }
