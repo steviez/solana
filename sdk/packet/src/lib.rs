@@ -9,7 +9,9 @@ use solana_frozen_abi_macro::AbiExample;
 use {
     bitflags::bitflags,
     std::{
-        fmt, io, mem,
+        fmt,
+        io::{self, Write},
+        mem,
         net::{IpAddr, Ipv4Addr, SocketAddr},
         ptr,
         slice::SliceIndex,
@@ -162,7 +164,7 @@ impl Packet {
     #[cfg(feature = "bincode")]
     /// Initializes a std::mem::MaybeUninit<Packet> such that the Packet can
     /// be safely extracted via methods such as MaybeUninit::assume_init()
-    pub fn init_packet<T: serde::Serialize>(
+    pub fn init_packet_from_data<T: serde::Serialize>(
         packet: &mut mem::MaybeUninit<Packet>,
         data: &T,
         addr: Option<&SocketAddr>,
@@ -176,24 +178,57 @@ impl Packet {
         } else {
             (IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
         };
-        // SAFETY: Access the field by pointer as creating a reference to
-        // and/or within the uninitialized Packet is undefined behavior
-        unsafe {
-            ptr::addr_of_mut!((*packet.as_mut_ptr()).meta).write(Meta {
+        Self::init_packet_meta(
+            packet,
+            Meta {
                 size: serialized_size,
                 addr: ip,
                 port,
                 flags: PacketFlags::empty(),
-            });
-        }
+            },
+        );
 
         Ok(())
+    }
+
+    pub fn init_packet_from_bytes(
+        packet: &mut mem::MaybeUninit<Packet>,
+        bytes: &[u8],
+        addr: Option<&SocketAddr>,
+    ) -> io::Result<()> {
+        let mut writer = PacketWriter::new_from_uninit_packet(packet);
+        let num_bytes_written = writer.write(bytes)?;
+        debug_assert_eq!(bytes.len(), num_bytes_written);
+
+        let size = writer.position();
+        let (ip, port) = if let Some(addr) = addr {
+            (addr.ip(), addr.port())
+        } else {
+            (IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+        };
+        Self::init_packet_meta(
+            packet,
+            Meta {
+                size,
+                addr: ip,
+                port,
+                flags: PacketFlags::empty(),
+            },
+        );
+
+        Ok(())
+    }
+
+    fn init_packet_meta(packet: &mut mem::MaybeUninit<Packet>, meta: Meta) {
+        // SAFETY: Access the field by pointer as creating a reference to
+        // and/or within the uninitialized Packet is undefined behavior
+        unsafe { ptr::addr_of_mut!((*packet.as_mut_ptr()).meta).write(meta) };
     }
 
     #[cfg(feature = "bincode")]
     pub fn from_data<T: serde::Serialize>(dest: Option<&SocketAddr>, data: T) -> Result<Self> {
         let mut packet = mem::MaybeUninit::uninit();
-        Self::init_packet(&mut packet, &data, dest)?;
+        Self::init_packet_from_data(&mut packet, &data, dest)?;
         // SAFETY: init_packet_from_data() just initialized the packet
         unsafe { Ok(packet.assume_init()) }
     }

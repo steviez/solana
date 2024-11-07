@@ -557,7 +557,7 @@ fn start_verify_transactions_gpu(
                     uninitialized_packets
                         .zip(transaction_iter)
                         .all(|(uninit_packet, tx)| {
-                            Packet::init_packet(uninit_packet, &tx, None).is_ok()
+                            Packet::init_packet_from_data(uninit_packet, &tx, None).is_ok()
                         });
 
                 if all_packets_initialized {
