@@ -317,7 +317,7 @@ impl PacketWriter {
     /// The offset of the write pointer within the buffer, which is also the
     /// number of bytes that have been written
     fn position(&self) -> usize {
-        PACKET_DATA_SIZE - self.spare_capacity
+        PACKET_DATA_SIZE.saturating_sub(self.spare_capacity)
     }
 }
 
@@ -329,13 +329,13 @@ impl io::Write for PacketWriter {
         }
 
         // SAFETY: We previously verifed that buf.len() <= self.spare_capacity
-        // so this write will not push us past the end of the buffer
+        // so this write will not push us past the end of the buffer. Likewise,
+        // we can update self.spare_capacity without fear of overflow
         unsafe {
             ptr::copy(buf.as_ptr(), self.position, buf.len());
             // Update position and spare_capacity for the next call to write()
             self.position = self.position.add(buf.len());
-            // Unchecked math since we know buf.len() <= spare_capacity
-            self.spare_capacity -= buf.len();
+            self.spare_capacity = self.spare_capacity.saturating_sub(buf.len());
         }
 
         Ok(buf.len())
