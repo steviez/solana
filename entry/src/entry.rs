@@ -24,7 +24,6 @@ use {
     solana_runtime_transaction::runtime_transaction::RuntimeTransaction,
     solana_sdk::{
         hash::Hash,
-        packet::Meta,
         transaction::{
             Result, SanitizedTransaction, Transaction, TransactionError,
             TransactionVerificationMode, VersionedTransaction,
@@ -548,26 +547,22 @@ fn start_verify_transactions_gpu(
                     num_transactions,
                     "entry-sig-verify",
                 );
-                // We use set_len here instead of resize(num_txs, Packet::default()), to save
-                // memory bandwidth and avoid writing a large amount of data that will be overwritten
-                // soon afterwards. As well, Packet::default() actually leaves the packet data
-                // uninitialized, so the initialization would simply write junk into
-                // the vector anyway.
-                unsafe {
-                    packet_batch.set_len(num_transactions);
-                }
+
+                let uninitialized_packets = packet_batch.spare_capacity_mut().iter_mut();
                 let transaction_iter = transaction_chunk
                     .iter()
                     .map(|tx| tx.to_versioned_transaction());
 
-                let res = packet_batch
-                    .iter_mut()
-                    .zip(transaction_iter)
-                    .all(|(packet, tx)| {
-                        *packet.meta_mut() = Meta::default();
-                        Packet::populate_packet(packet, None, &tx).is_ok()
-                    });
-                if res {
+                let all_packets_initialized =
+                    uninitialized_packets
+                        .zip(transaction_iter)
+                        .all(|(uninit_packet, tx)| {
+                            Packet::init_packet(uninit_packet, &tx, None).is_ok()
+                        });
+
+                if all_packets_initialized {
+                    // SAFETY: All packets have been successfully initialized
+                    unsafe { packet_batch.set_len(num_transactions) };
                     Ok(packet_batch)
                 } else {
                     Err(TransactionError::SanitizeFailure)
