@@ -192,9 +192,10 @@ impl Packet {
 
     #[cfg(feature = "bincode")]
     pub fn from_data<T: serde::Serialize>(dest: Option<&SocketAddr>, data: T) -> Result<Self> {
-        let mut packet = Self::default();
-        Self::populate_packet(&mut packet, dest, &data)?;
-        Ok(packet)
+        let mut packet = mem::MaybeUninit::uninit();
+        Self::init_packet(&mut packet, &data, dest)?;
+        // SAFETY: init_packet_from_data() just initialized the packet
+        unsafe { Ok(packet.assume_init()) }
     }
 
     #[cfg(feature = "bincode")]
