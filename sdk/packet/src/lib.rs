@@ -363,6 +363,11 @@ impl Meta {
     }
 
     #[inline]
+    pub fn set_flags(&mut self, flags: PacketFlags) {
+        self.flags = flags;
+    }
+
+    #[inline]
     pub fn discard(&self) -> bool {
         self.flags.contains(PacketFlags::DISCARD)
     }
