@@ -332,7 +332,7 @@ impl io::Write for PacketWriter {
         // so this write will not push us past the end of the buffer. Likewise,
         // we can update self.spare_capacity without fear of overflow
         unsafe {
-            ptr::copy(buf.as_ptr(), self.position, buf.len());
+            ptr::copy_nonoverlapping(buf.as_ptr(), self.position, buf.len());
             // Update position and spare_capacity for the next call to write()
             self.position = self.position.add(buf.len());
             self.spare_capacity = self.spare_capacity.saturating_sub(buf.len());
