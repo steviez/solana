@@ -36,6 +36,7 @@ use {
         ffi::{CStr, CString},
         fs,
         marker::PhantomData,
+        mem,
         path::Path,
         sync::{
             atomic::{AtomicBool, AtomicU64, Ordering},
@@ -768,8 +769,15 @@ impl Rocks {
 
 pub trait Column {
     type Index;
+    const KEY_LEN: usize;
 
-    fn key(index: Self::Index) -> Vec<u8>;
+    fn serialize_key(buffer: &mut [u8], key: Self::Index);
+    // TODO: key() hopefully goes away eventually
+    fn key(index: Self::Index) -> Vec<u8> {
+        let mut key = vec![0; Self::KEY_LEN];
+        Self::serialize_key(&mut key, index);
+        key
+    }
     fn index(key: &[u8]) -> Self::Index;
     // This trait method is primarily used by `Database::delete_range_cf()`, and is therefore only
     // relevant for columns keyed by Slot: ie. SlotColumns and columns that feature a Slot as the
@@ -813,12 +821,10 @@ pub trait SlotColumn<Index = Slot> {}
 
 impl<T: SlotColumn> Column for T {
     type Index = Slot;
+    const KEY_LEN: usize = mem::size_of::<Slot>();
 
-    /// Converts a u64 Index to its RocksDB key.
-    fn key(slot: u64) -> Vec<u8> {
-        let mut key = vec![0; 8];
-        BigEndian::write_u64(&mut key[..], slot);
-        key
+    fn serialize_key(buffer: &mut [u8], slot: Self::Index) {
+        BigEndian::write_u64(&mut buffer[..], slot);
     }
 
     /// Converts a RocksDB key to its u64 Index.
@@ -868,12 +874,11 @@ pub trait ColumnIndexDeprecation: Column {
 
 impl Column for columns::TransactionStatus {
     type Index = (Signature, Slot);
+    const KEY_LEN: usize = mem::size_of::<Signature>() + mem::size_of::<Slot>();
 
-    fn key((signature, slot): Self::Index) -> Vec<u8> {
-        let mut key = vec![0; Self::CURRENT_INDEX_LEN];
-        key[0..64].copy_from_slice(&signature.as_ref()[0..64]);
-        BigEndian::write_u64(&mut key[64..72], slot);
-        key
+    fn serialize_key(buffer: &mut [u8], (signature, slot): Self::Index) {
+        buffer[0..64].copy_from_slice(&signature.as_ref()[0..64]);
+        BigEndian::write_u64(&mut buffer[64..72], slot);
     }
 
     fn index(key: &[u8]) -> (Signature, Slot) {
@@ -937,14 +942,16 @@ impl ColumnIndexDeprecation for columns::TransactionStatus {
 
 impl Column for columns::AddressSignatures {
     type Index = (Pubkey, Slot, u32, Signature);
+    const KEY_LEN: usize = mem::size_of::<Pubkey>()
+        + mem::size_of::<Slot>()
+        + mem::size_of::<u32>()
+        + mem::size_of::<Signature>();
 
-    fn key((pubkey, slot, transaction_index, signature): Self::Index) -> Vec<u8> {
-        let mut key = vec![0; Self::CURRENT_INDEX_LEN];
-        key[0..32].copy_from_slice(&pubkey.as_ref()[0..32]);
-        BigEndian::write_u64(&mut key[32..40], slot);
-        BigEndian::write_u32(&mut key[40..44], transaction_index);
-        key[44..108].copy_from_slice(&signature.as_ref()[0..64]);
-        key
+    fn serialize_key(buffer: &mut [u8], (pubkey, slot, transaction_index, signature): Self::Index) {
+        buffer[0..32].copy_from_slice(&pubkey.as_ref()[0..32]);
+        BigEndian::write_u64(&mut buffer[32..40], slot);
+        BigEndian::write_u32(&mut buffer[40..44], transaction_index);
+        buffer[44..108].copy_from_slice(&signature.as_ref()[0..64]);
     }
 
     fn index(key: &[u8]) -> Self::Index {
@@ -1009,12 +1016,11 @@ impl ColumnIndexDeprecation for columns::AddressSignatures {
 
 impl Column for columns::TransactionMemos {
     type Index = (Signature, Slot);
+    const KEY_LEN: usize = mem::size_of::<Signature>() + mem::size_of::<Slot>();
 
-    fn key((signature, slot): Self::Index) -> Vec<u8> {
-        let mut key = vec![0; Self::CURRENT_INDEX_LEN];
-        key[0..64].copy_from_slice(&signature.as_ref()[0..64]);
-        BigEndian::write_u64(&mut key[64..72], slot);
-        key
+    fn serialize_key(buffer: &mut [u8], (signature, slot): Self::Index) {
+        buffer[0..64].copy_from_slice(&signature.as_ref()[0..64]);
+        BigEndian::write_u64(&mut buffer[64..72], slot);
     }
 
     fn index(key: &[u8]) -> Self::Index {
@@ -1064,11 +1070,10 @@ impl ColumnIndexDeprecation for columns::TransactionMemos {
 
 impl Column for columns::TransactionStatusIndex {
     type Index = u64;
+    const KEY_LEN: usize = mem::size_of::<u64>();
 
-    fn key(index: u64) -> Vec<u8> {
-        let mut key = vec![0; 8];
-        BigEndian::write_u64(&mut key[..], index);
-        key
+    fn serialize_key(buffer: &mut [u8], index: Self::Index) {
+        BigEndian::write_u64(&mut buffer[..], index);
     }
 
     fn index(key: &[u8]) -> u64 {
@@ -1124,11 +1129,10 @@ impl TypedColumn for columns::ProgramCosts {
 }
 impl Column for columns::ProgramCosts {
     type Index = Pubkey;
+    const KEY_LEN: usize = mem::size_of::<Pubkey>();
 
-    fn key(pubkey: Pubkey) -> Vec<u8> {
-        let mut key = vec![0; 32]; // size_of Pubkey
-        key[0..32].copy_from_slice(&pubkey.as_ref()[0..32]);
-        key
+    fn serialize_key(buffer: &mut [u8], pubkey: Self::Index) {
+        buffer[0..32].copy_from_slice(&pubkey.as_ref()[0..32]);
     }
 
     fn index(key: &[u8]) -> Self::Index {
@@ -1146,9 +1150,11 @@ impl Column for columns::ProgramCosts {
 
 impl Column for columns::ShredCode {
     type Index = (Slot, u64);
+    const KEY_LEN: usize = mem::size_of::<Slot>() + mem::size_of::<u64>();
 
-    fn key(index: (Slot, u64)) -> Vec<u8> {
-        columns::ShredData::key(index)
+    fn serialize_key(buffer: &mut [u8], index: Self::Index) {
+        // ShredCode and ShredData have the same key format
+        columns::ShredData::serialize_key(buffer, index);
     }
 
     fn index(key: &[u8]) -> (Slot, u64) {
@@ -1169,12 +1175,11 @@ impl ColumnName for columns::ShredCode {
 
 impl Column for columns::ShredData {
     type Index = (Slot, u64);
+    const KEY_LEN: usize = mem::size_of::<Slot>() + mem::size_of::<u64>();
 
-    fn key((slot, index): (Slot, u64)) -> Vec<u8> {
-        let mut key = vec![0; 16];
-        BigEndian::write_u64(&mut key[..8], slot);
-        BigEndian::write_u64(&mut key[8..16], index);
-        key
+    fn serialize_key(buffer: &mut [u8], (slot, index): Self::Index) {
+        BigEndian::write_u64(&mut buffer[..8], slot);
+        BigEndian::write_u64(&mut buffer[8..16], index);
     }
 
     fn index(key: &[u8]) -> (Slot, u64) {
@@ -1253,19 +1258,18 @@ impl TypedColumn for columns::SlotMeta {
 
 impl Column for columns::ErasureMeta {
     type Index = (Slot, u64);
+    const KEY_LEN: usize = mem::size_of::<Slot>() + mem::size_of::<u64>();
+
+    fn serialize_key(buffer: &mut [u8], (slot, set_index): Self::Index) {
+        BigEndian::write_u64(&mut buffer[..8], slot);
+        BigEndian::write_u64(&mut buffer[8..16], set_index);
+    }
 
     fn index(key: &[u8]) -> (Slot, u64) {
         let slot = BigEndian::read_u64(&key[..8]);
         let set_index = BigEndian::read_u64(&key[8..]);
 
         (slot, set_index)
-    }
-
-    fn key((slot, set_index): (Slot, u64)) -> Vec<u8> {
-        let mut key = vec![0; 16];
-        BigEndian::write_u64(&mut key[..8], slot);
-        BigEndian::write_u64(&mut key[8..], set_index);
-        key
     }
 
     fn slot(index: Self::Index) -> Slot {
@@ -1293,19 +1297,18 @@ impl TypedColumn for columns::OptimisticSlots {
 
 impl Column for columns::MerkleRootMeta {
     type Index = (Slot, /*fec_set_index:*/ u32);
+    const KEY_LEN: usize = mem::size_of::<Slot>() + mem::size_of::<u32>();
+
+    fn serialize_key(buffer: &mut [u8], (slot, fec_set_index): Self::Index) {
+        BigEndian::write_u64(&mut buffer[..8], slot);
+        BigEndian::write_u32(&mut buffer[8..], fec_set_index);
+    }
 
     fn index(key: &[u8]) -> Self::Index {
         let slot = BigEndian::read_u64(&key[..8]);
         let fec_set_index = BigEndian::read_u32(&key[8..]);
 
         (slot, fec_set_index)
-    }
-
-    fn key((slot, fec_set_index): Self::Index) -> Vec<u8> {
-        let mut key = vec![0; 12];
-        BigEndian::write_u64(&mut key[..8], slot);
-        BigEndian::write_u32(&mut key[8..], fec_set_index);
-        key
     }
 
     fn slot((slot, _fec_set_index): Self::Index) -> Slot {
@@ -1332,7 +1335,7 @@ pub struct Database {
 }
 
 #[derive(Debug)]
-pub struct LedgerColumn<C>
+pub struct LedgerColumn<C, const K: usize>
 where
     C: Column + ColumnName,
 {
@@ -1343,7 +1346,7 @@ where
     write_perf_status: PerfSamplingStatus,
 }
 
-impl<C: Column + ColumnName> LedgerColumn<C> {
+impl<C: Column + ColumnName, const K: usize> LedgerColumn<C, K> {
     pub fn submit_rocksdb_cf_metrics(&self) {
         let cf_rocksdb_metrics = BlockstoreRocksDbColumnFamilyMetrics {
             total_sst_files_size: self
@@ -1446,7 +1449,7 @@ impl Database {
         self.backend.cf_handle(C::NAME)
     }
 
-    pub fn column<C>(&self) -> LedgerColumn<C>
+    pub fn column<C, const K: usize>(&self) -> LedgerColumn<C, K>
     where
         C: Column + ColumnName,
     {
@@ -1499,7 +1502,7 @@ impl Database {
     }
 }
 
-impl<C> LedgerColumn<C>
+impl<C, const K: usize> LedgerColumn<C, K>
 where
     C: Column + ColumnName,
 {
@@ -1672,7 +1675,7 @@ where
     }
 }
 
-impl<C> LedgerColumn<C>
+impl<C, const K: usize> LedgerColumn<C, K>
 where
     C: TypedColumn + ColumnName,
 {
@@ -1765,7 +1768,7 @@ where
     }
 }
 
-impl<C> LedgerColumn<C>
+impl<C, const K: usize> LedgerColumn<C, K>
 where
     C: ProtobufColumn + ColumnName,
 {
@@ -1849,7 +1852,7 @@ where
     }
 }
 
-impl<C> LedgerColumn<C>
+impl<C, const K: usize> LedgerColumn<C, K>
 where
     C: ColumnIndexDeprecation + ColumnName,
 {
@@ -2221,7 +2224,7 @@ pub mod tests {
         }
     }
 
-    impl<C> LedgerColumn<C>
+    impl<C, const K: usize> LedgerColumn<C, K>
     where
         C: ColumnIndexDeprecation + ProtobufColumn + ColumnName,
     {
@@ -2237,7 +2240,7 @@ pub mod tests {
         }
     }
 
-    impl<C> LedgerColumn<C>
+    impl<C, const K: usize> LedgerColumn<C, K>
     where
         C: ColumnIndexDeprecation + TypedColumn + ColumnName,
     {
@@ -2248,7 +2251,7 @@ pub mod tests {
         }
     }
 
-    impl<C> LedgerColumn<C>
+    impl<C, const K: usize> LedgerColumn<C, K>
     where
         C: ColumnIndexDeprecation + ColumnName,
     {
