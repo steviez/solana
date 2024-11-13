@@ -1511,7 +1511,11 @@ where
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
         );
-        let result = self.backend.get_cf(self.handle(), &C::key(key));
+
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
+        let result = self.backend.get_cf(self.handle(), &key_buffer);
+
         if let Some(op_start_instant) = is_perf_enabled {
             report_rocksdb_read_perf(
                 C::NAME,
@@ -1568,10 +1572,16 @@ where
     where
         C::Index: PartialOrd + Copy,
     {
-        let cf = self.handle();
-        let from = Some(C::key(C::as_index(from)));
-        let to = Some(C::key(C::as_index(to)));
-        self.backend.db.compact_range_cf(cf, from, to);
+        let mut from_key_buffer = [0u8; K];
+        C::serialize_key(&mut from_key_buffer, C::as_index(from));
+        let mut to_key_buffer = [0u8; K];
+        C::serialize_key(&mut to_key_buffer, C::as_index(to));
+
+        self.backend.db.compact_range_cf(
+            self.handle(),
+            Some(&from_key_buffer),
+            Some(&to_key_buffer),
+        );
         Ok(true)
     }
 
@@ -1592,7 +1602,11 @@ where
             self.column_options.rocks_perf_sample_interval,
             &self.write_perf_status,
         );
-        let result = self.backend.put_cf(self.handle(), &C::key(key), value);
+
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
+        let result = self.backend.put_cf(self.handle(), &key_buffer, value);
+
         if let Some(op_start_instant) = is_perf_enabled {
             report_rocksdb_write_perf(
                 C::NAME,
@@ -1610,8 +1624,9 @@ where
         key: C::Index,
         value: &[u8],
     ) -> Result<()> {
-        let key = C::key(key);
-        batch.put_cf(self.handle(), &key, value)
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
+        batch.put_cf(self.handle(), &key_buffer, value)
     }
 
     /// Retrieves the specified RocksDB integer property of the current
@@ -1628,7 +1643,11 @@ where
             self.column_options.rocks_perf_sample_interval,
             &self.write_perf_status,
         );
-        let result = self.backend.delete_cf(self.handle(), &C::key(key));
+
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
+        let result = self.backend.delete_cf(self.handle(), &key_buffer);
+
         if let Some(op_start_instant) = is_perf_enabled {
             report_rocksdb_write_perf(
                 C::NAME,
@@ -1641,8 +1660,9 @@ where
     }
 
     pub fn delete_in_batch(&self, batch: &mut WriteBatch, key: C::Index) -> Result<()> {
-        let key = C::key(key);
-        batch.delete_cf(self.handle(), &key)
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
+        batch.delete_cf(self.handle(), &key_buffer)
     }
 
     /// Adds a \[`from`, `to`\] range that deletes all entries between the `from` slot
@@ -1657,9 +1677,11 @@ where
         //
         // For consistency, we make our delete_range_cf works for [from, to] by
         // adjusting the `to` slot range by 1.
-        let from_key = C::key(C::as_index(from));
-        let to_key = C::key(C::as_index(to.saturating_add(1)));
-        batch.delete_range_cf(self.handle(), &from_key, &to_key)
+        let mut from_key_buffer = [0u8; K];
+        C::serialize_key(&mut from_key_buffer, C::as_index(from));
+        let mut to_key_buffer = [0u8; K];
+        C::serialize_key(&mut to_key_buffer, C::as_index(to.saturating_add(1)));
+        batch.delete_range_cf(self.handle(), &from_key_buffer, &to_key_buffer)
     }
 
     /// Delete files whose slot range is within \[`from`, `to`\].
@@ -1667,11 +1689,12 @@ where
     where
         C: Column + ColumnName,
     {
-        self.backend.delete_file_in_range_cf(
-            self.handle(),
-            &C::key(C::as_index(from)),
-            &C::key(C::as_index(to)),
-        )
+        let mut from_key_buffer = [0u8; K];
+        C::serialize_key(&mut from_key_buffer, C::as_index(from));
+        let mut to_key_buffer = [0u8; K];
+        C::serialize_key(&mut to_key_buffer, C::as_index(to));
+        self.backend
+            .delete_file_in_range_cf(self.handle(), &from_key_buffer, &to_key_buffer)
     }
 }
 
@@ -1709,7 +1732,9 @@ where
     }
 
     pub fn get(&self, key: C::Index) -> Result<Option<C::Type>> {
-        self.get_raw(&C::key(key))
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
+        self.get_raw(&key_buffer)
     }
 
     pub fn get_raw(&self, key: &[u8]) -> Result<Option<C::Type>> {
@@ -1718,6 +1743,7 @@ where
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
         );
+
         if let Some(pinnable_slice) = self.backend.get_pinned_cf(self.handle(), key)? {
             let value = deserialize(pinnable_slice.as_ref())?;
             result = Ok(Some(value))
@@ -1741,9 +1767,11 @@ where
         );
         let serialized_value = serialize(value)?;
 
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
         let result = self
             .backend
-            .put_cf(self.handle(), &C::key(key), &serialized_value);
+            .put_cf(self.handle(), &key_buffer, &serialized_value);
 
         if let Some(op_start_instant) = is_perf_enabled {
             report_rocksdb_write_perf(
@@ -1762,9 +1790,10 @@ where
         key: C::Index,
         value: &C::Type,
     ) -> Result<()> {
-        let key = C::key(key);
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
         let serialized_value = serialize(value)?;
-        batch.put_cf(self.handle(), &key, &serialized_value)
+        batch.put_cf(self.handle(), &key_buffer, &serialized_value)
     }
 }
 
@@ -1776,7 +1805,9 @@ where
         &self,
         key: C::Index,
     ) -> Result<Option<C::Type>> {
-        self.get_raw_protobuf_or_bincode::<T>(&C::key(key))
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
+        self.get_raw_protobuf_or_bincode::<T>(&key_buffer)
     }
 
     pub(crate) fn get_raw_protobuf_or_bincode<T: DeserializeOwned + Into<C::Type>>(
@@ -1813,7 +1844,11 @@ where
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
         );
-        let result = self.backend.get_pinned_cf(self.handle(), &C::key(key));
+
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
+        let result = self.backend.get_pinned_cf(self.handle(), &key_buffer);
+
         if let Some(op_start_instant) = is_perf_enabled {
             report_rocksdb_read_perf(
                 C::NAME,
@@ -1838,7 +1873,11 @@ where
             self.column_options.rocks_perf_sample_interval,
             &self.write_perf_status,
         );
-        let result = self.backend.put_cf(self.handle(), &C::key(key), &buf);
+
+        let mut key_buffer = [0u8; K];
+        C::serialize_key(&mut key_buffer, key);
+        let result = self.backend.put_cf(self.handle(), &key_buffer, &buf);
+
         if let Some(op_start_instant) = is_perf_enabled {
             report_rocksdb_write_perf(
                 C::NAME,
