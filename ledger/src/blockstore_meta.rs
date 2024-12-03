@@ -5,7 +5,6 @@ use {
     },
     bitflags::bitflags,
     serde::{Deserialize, Deserializer, Serialize, Serializer},
-    serde_with::serde_as,
     solana_sdk::{
         clock::{Slot, UnixTimestamp},
         hash::Hash,
@@ -330,10 +329,8 @@ const MAX_U64S_PER_SLOT: usize = MAX_DATA_SHREDS_PER_SLOT / 64;
 ///   requested range, avoiding unnecessary traversal.
 /// - **Simplified Serialization**: The contiguous memory layout allows for efficient
 ///   serialization/deserialization without tree reconstruction.
-#[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShredIndexNext {
-    #[serde_as(as = "[_; MAX_U64S_PER_SLOT]")]
     index: [u64; MAX_U64S_PER_SLOT],
     num_shreds: usize,
 }
@@ -344,6 +341,55 @@ impl Default for ShredIndexNext {
             index: [0; MAX_U64S_PER_SLOT],
             num_shreds: 0,
         }
+    }
+}
+
+impl Serialize for ShredIndexNext {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // SAFETY: This is safe because:
+        // 1. Memory initialization & layout:
+        //    - index is a fixed-size array [u64; MAX_U64S_PER_SLOT] fully initialized
+        //      at construction and never contains uninitialized memory
+        //    - array elements are contiguous with no padding
+        //
+        // 2. Size & alignment:
+        //    - size_of::<[u64; MAX_U64S_PER_SLOT]> is exactly (8 * MAX_U64S_PER_SLOT) bytes
+        //    - &self.index is u64-aligned, which satisfies u8 alignment
+        //
+        // 3. Lifetime:
+        //    - slice lifetime is tied to &self and is read-only
+        //
+        // Note: Deserialization will validate the byte length and safely reconstruct the u64 array
+        serializer.serialize_bytes(unsafe {
+            std::slice::from_raw_parts(
+                &self.index as *const _ as *const u8,
+                std::mem::size_of::<[u64; MAX_U64S_PER_SLOT]>(),
+            )
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for ShredIndexNext {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = <&[u8]>::deserialize(deserializer)?;
+        if bytes.len() != std::mem::size_of::<[u64; MAX_U64S_PER_SLOT]>() {
+            return Err(serde::de::Error::custom("invalid length"));
+        }
+        let mut index = [0u64; MAX_U64S_PER_SLOT];
+        bytes.chunks_exact(8).enumerate().for_each(|(i, chunk)| {
+            // Unwrap is safe because `chunks_exact` guarantees the length
+            index[i] = u64::from_ne_bytes(chunk.try_into().unwrap());
+        });
+        Ok(Self {
+            index,
+            num_shreds: index.iter().map(|x| x.count_ones() as usize).sum(),
+        })
     }
 }
 
@@ -904,6 +950,40 @@ mod test {
 
             assert_eq!(e_meta.status(&index), DataFull);
         }
+    }
+
+    #[test]
+    fn shred_index_next_serde() {
+        let index: ShredIndexNext = (0..MAX_DATA_SHREDS_PER_SLOT as u64).skip(3).collect();
+        let serialized = bincode::serialize(&index).unwrap();
+        let deserialized = bincode::deserialize::<ShredIndexNext>(&serialized).unwrap();
+        assert_eq!(index, deserialized);
+    }
+
+    #[test]
+    fn shred_index_collision() {
+        let mut index = ShredIndex::default();
+        // Create a `ShredIndex` that is exactly the expected size of `ShredIndexNext`
+        for i in 0..MAX_DATA_SHREDS_PER_SLOT as u64 {
+            index.insert(i);
+        }
+        let serialized = bincode::serialize(&index).unwrap();
+        // Attempt to deserialize as `ShredIndexNext`
+        let deserialized = bincode::deserialize::<ShredIndexNext>(&serialized);
+        assert!(deserialized.is_err());
+    }
+
+    #[test]
+    fn shred_index_next_collision() {
+        let index = ShredIndexNext::default();
+        let serialized = bincode::serialize(&index).unwrap();
+        let deserialized = bincode::deserialize::<ShredIndex>(&serialized);
+        assert!(deserialized.is_err());
+
+        let index: ShredIndexNext = (0..MAX_DATA_SHREDS_PER_SLOT as u64).skip(3).collect();
+        let serialized = bincode::serialize(&index).unwrap();
+        let deserialized = bincode::deserialize::<ShredIndex>(&serialized);
+        assert!(deserialized.is_err());
     }
 
     #[test]
