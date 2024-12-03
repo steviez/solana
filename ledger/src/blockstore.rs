@@ -2490,7 +2490,16 @@ impl Blockstore {
     }
 
     pub fn get_index(&self, slot: Slot) -> Result<Option<Index>> {
-        self.index_cf.get(slot)
+        self.index_cf.get_with(slot, |slice| {
+            let index: bincode::Result<Index> = bincode::deserialize(slice);
+            match index {
+                Ok(index) => Ok(index),
+                Err(_) => {
+                    let index_next: IndexNext = bincode::deserialize(slice)?;
+                    Ok(index_next.into())
+                }
+            }
+        })
     }
 
     /// Manually update the meta for a slot.
