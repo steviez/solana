@@ -117,6 +117,33 @@ pub struct Index {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct IndexNext {
+    pub slot: Slot,
+    data: ShredIndexNext,
+    coding: ShredIndexNext,
+}
+
+impl From<IndexNext> for Index {
+    fn from(index: IndexNext) -> Self {
+        Index {
+            slot: index.slot,
+            data: index.data.into(),
+            coding: index.coding.into(),
+        }
+    }
+}
+
+impl From<Index> for IndexNext {
+    fn from(index: Index) -> Self {
+        IndexNext {
+            slot: index.slot,
+            data: index.data.into(),
+            coding: index.coding.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ShredIndex {
     /// Map representing presence/absence of shreds
     index: BTreeSet<u64>,
