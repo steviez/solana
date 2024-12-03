@@ -120,10 +120,8 @@ impl ByteShredIndex {
     }
 }
 
-#[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct U64ShredIndex {
-    #[serde_as(as = "[_; NUM_U64S]")]
     index: [u64; NUM_U64S],
     num_shreds: usize,
 }
@@ -134,6 +132,54 @@ impl Default for U64ShredIndex {
             index: [0; NUM_U64S],
             num_shreds: 0,
         }
+    }
+}
+
+impl Serialize for U64ShredIndex {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // SAFETY: This is safe because:
+        // 1. Memory initialization & layout:
+        //    - index is a fixed-size array [u64; NUM_U64S] fully initialized
+        //      at construction and never contains uninitialized memory
+        //    - array elements are contiguous with no padding
+        //
+        // 2. Size & alignment:
+        //    - size_of::<[u64; NUM_U64S]> is exactly (8 * NUM_U64S) bytes
+        //    - &self.index is u64-aligned, which satisfies u8 alignment
+        //
+        // 3. Lifetime:
+        //    - slice lifetime is tied to &self and is read-only
+        //
+        // Note: Deserialization will validate the byte length and safely reconstruct the u64 array
+        serializer.serialize_bytes(unsafe {
+            std::slice::from_raw_parts(
+                &self.index as *const _ as *const u8,
+                std::mem::size_of::<[u64; NUM_U64S]>(),
+            )
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for U64ShredIndex {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = <&[u8]>::deserialize(deserializer)?;
+        if bytes.len() != std::mem::size_of::<[u64; NUM_U64S]>() {
+            return Err(serde::de::Error::custom("invalid length"));
+        }
+        let mut index = [0u64; NUM_U64S];
+        bytes.chunks_exact(8).enumerate().for_each(|(i, chunk)| {
+            index[i] = u64::from_ne_bytes(chunk.try_into().unwrap());
+        });
+        Ok(Self {
+            index,
+            num_shreds: index.iter().map(|x| x.count_ones() as usize).sum(),
+        })
     }
 }
 
