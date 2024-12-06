@@ -1,5 +1,6 @@
 #![allow(clippy::arithmetic_side_effects)]
 mod cluster_tpu_info;
+pub mod cache_block_meta_service;
 pub mod filter;
 pub mod max_slots;
 pub mod optimistically_confirmed_bank_tracker;
