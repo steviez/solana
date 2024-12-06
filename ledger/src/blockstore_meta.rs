@@ -409,9 +409,10 @@ impl ShredIndexNext {
 
     #[allow(unused)]
     fn remove(&mut self, index: u64) {
-        if index >= MAX_DATA_SHREDS_PER_SLOT as u64 {
-            return;
-        }
+        assert!(
+            index < MAX_DATA_SHREDS_PER_SLOT as u64,
+            "index out of bounds. {index} >= {MAX_DATA_SHREDS_PER_SLOT}"
+        );
 
         let (word_idx, mask) = Self::index_and_mask(index);
 
