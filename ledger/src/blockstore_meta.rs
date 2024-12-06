@@ -378,8 +378,12 @@ impl<'de> Deserialize<'de> for ShredIndexV2 {
         D: serde::Deserializer<'de>,
     {
         let bytes = <&[u8]>::deserialize(deserializer)?;
-        if bytes.len() != std::mem::size_of::<[u64; MAX_U64S_PER_SLOT]>() {
-            return Err(serde::de::Error::custom("invalid length"));
+        // Accept input smaller than our current fixed array size to maintain compatibility with older
+        // versions that had fewer shreds per slot. This is safe because smaller sets are stored in
+        // our fixed array with any remaining space automatically zeroed. This approach ensures we can
+        // read data from any previous version while enforcing a maximum size limit.
+        if bytes.len() > std::mem::size_of::<[u64; MAX_U64S_PER_SLOT]>() {
+            return Err(serde::de::Error::custom("input too large"));
         }
         let mut index = [0u64; MAX_U64S_PER_SLOT];
         bytes.chunks_exact(8).enumerate().for_each(|(i, chunk)| {
