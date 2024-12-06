@@ -2501,7 +2501,7 @@ impl Blockstore {
             match index {
                 Ok(index) => Ok(index),
                 Err(_) => {
-                    let index_next: IndexNext = bincode::deserialize(slice)?;
+                    let index_next: IndexV2 = bincode::deserialize(slice)?;
                     Ok(index_next.into())
                 }
             }

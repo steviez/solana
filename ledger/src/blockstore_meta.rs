@@ -116,14 +116,14 @@ pub struct Index {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct IndexNext {
+pub struct IndexV2 {
     pub slot: Slot,
-    data: ShredIndexNext,
-    coding: ShredIndexNext,
+    data: ShredIndexV2,
+    coding: ShredIndexV2,
 }
 
-impl From<IndexNext> for Index {
-    fn from(index: IndexNext) -> Self {
+impl From<IndexV2> for Index {
+    fn from(index: IndexV2) -> Self {
         Index {
             slot: index.slot,
             data: index.data.into(),
@@ -132,9 +132,9 @@ impl From<IndexNext> for Index {
     }
 }
 
-impl From<Index> for IndexNext {
+impl From<Index> for IndexV2 {
     fn from(index: Index) -> Self {
-        IndexNext {
+        IndexV2 {
             slot: index.slot,
             data: index.data.into(),
             coding: index.coding.into(),
@@ -280,9 +280,9 @@ impl Index {
     }
 }
 
-/// Superseded by [`ShredIndexNext`].
+/// Superseded by [`ShredIndexV2`].
 ///
-/// TODO: Remove this once new [`ShredIndexNext`] is fully rolled out
+/// TODO: Remove this once new [`ShredIndexV2`] is fully rolled out
 /// and no longer relies on it for fallback.
 impl ShredIndex {
     pub fn num_shreds(&self) -> usize {
@@ -330,12 +330,12 @@ const MAX_U64S_PER_SLOT: usize = (MAX_DATA_SHREDS_PER_SLOT + 63) / 64;
 /// - **Simplified Serialization**: The contiguous memory layout allows for efficient
 ///   serialization/deserialization without tree reconstruction.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ShredIndexNext {
+pub struct ShredIndexV2 {
     index: [u64; MAX_U64S_PER_SLOT],
     num_shreds: usize,
 }
 
-impl Default for ShredIndexNext {
+impl Default for ShredIndexV2 {
     fn default() -> Self {
         Self {
             index: [0; MAX_U64S_PER_SLOT],
@@ -344,7 +344,7 @@ impl Default for ShredIndexNext {
     }
 }
 
-impl Serialize for ShredIndexNext {
+impl Serialize for ShredIndexV2 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -372,7 +372,7 @@ impl Serialize for ShredIndexNext {
     }
 }
 
-impl<'de> Deserialize<'de> for ShredIndexNext {
+impl<'de> Deserialize<'de> for ShredIndexV2 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -393,7 +393,7 @@ impl<'de> Deserialize<'de> for ShredIndexNext {
     }
 }
 
-impl ShredIndexNext {
+impl ShredIndexV2 {
     pub fn num_shreds(&self) -> usize {
         self.num_shreds
     }
@@ -546,9 +546,9 @@ impl ShredIndexNext {
     }
 }
 
-impl FromIterator<u64> for ShredIndexNext {
+impl FromIterator<u64> for ShredIndexV2 {
     fn from_iter<T: IntoIterator<Item = u64>>(iter: T) -> Self {
-        let mut next_index = ShredIndexNext::default();
+        let mut next_index = ShredIndexV2::default();
         for idx in iter {
             next_index.insert(idx);
         }
@@ -556,14 +556,14 @@ impl FromIterator<u64> for ShredIndexNext {
     }
 }
 
-impl From<ShredIndex> for ShredIndexNext {
+impl From<ShredIndex> for ShredIndexV2 {
     fn from(value: ShredIndex) -> Self {
         value.index.into_iter().collect()
     }
 }
 
-impl From<ShredIndexNext> for ShredIndex {
-    fn from(value: ShredIndexNext) -> Self {
+impl From<ShredIndexV2> for ShredIndex {
+    fn from(value: ShredIndexV2) -> Self {
         ShredIndex {
             index: value.iter().collect(),
         }
@@ -957,33 +957,33 @@ mod test {
 
     #[test]
     fn shred_index_next_serde() {
-        let index: ShredIndexNext = (0..MAX_DATA_SHREDS_PER_SLOT as u64).skip(3).collect();
+        let index: ShredIndexV2 = (0..MAX_DATA_SHREDS_PER_SLOT as u64).skip(3).collect();
         let serialized = bincode::serialize(&index).unwrap();
-        let deserialized = bincode::deserialize::<ShredIndexNext>(&serialized).unwrap();
+        let deserialized = bincode::deserialize::<ShredIndexV2>(&serialized).unwrap();
         assert_eq!(index, deserialized);
     }
 
     #[test]
     fn shred_index_collision() {
         let mut index = ShredIndex::default();
-        // Create a `ShredIndex` that is exactly the expected size of `ShredIndexNext`
+        // Create a `ShredIndex` that is exactly the expected size of `ShredIndexV2`
         for i in 0..MAX_DATA_SHREDS_PER_SLOT as u64 {
             index.insert(i);
         }
         let serialized = bincode::serialize(&index).unwrap();
-        // Attempt to deserialize as `ShredIndexNext`
-        let deserialized = bincode::deserialize::<ShredIndexNext>(&serialized);
+        // Attempt to deserialize as `ShredIndexV2`
+        let deserialized = bincode::deserialize::<ShredIndexV2>(&serialized);
         assert!(deserialized.is_err());
     }
 
     #[test]
     fn shred_index_next_collision() {
-        let index = ShredIndexNext::default();
+        let index = ShredIndexV2::default();
         let serialized = bincode::serialize(&index).unwrap();
         let deserialized = bincode::deserialize::<ShredIndex>(&serialized);
         assert!(deserialized.is_err());
 
-        let index: ShredIndexNext = (0..MAX_DATA_SHREDS_PER_SLOT as u64).skip(3).collect();
+        let index: ShredIndexV2 = (0..MAX_DATA_SHREDS_PER_SLOT as u64).skip(3).collect();
         let serialized = bincode::serialize(&index).unwrap();
         let deserialized = bincode::deserialize::<ShredIndex>(&serialized);
         assert!(deserialized.is_err());
@@ -993,7 +993,7 @@ mod test {
     fn shred_index_legacy_compat() {
         use rand::Rng;
         let mut legacy = ShredIndex::default();
-        let mut next_index = ShredIndexNext::default();
+        let mut next_index = ShredIndexV2::default();
 
         for i in (0..MAX_DATA_SHREDS_PER_SLOT as u64).skip(3) {
             next_index.insert(i);
@@ -1012,13 +1012,13 @@ mod test {
             legacy.range(0..rand_range).sum::<u64>()
         );
 
-        assert_eq!(ShredIndexNext::from(legacy.clone()), next_index);
+        assert_eq!(ShredIndexV2::from(legacy.clone()), next_index);
         assert_eq!(ShredIndex::from(next_index), legacy);
     }
 
     #[test]
     fn test_shred_index_next_boundary_conditions() {
-        let mut index = ShredIndexNext::default();
+        let mut index = ShredIndexV2::default();
 
         // First possible index
         index.insert(0);
