@@ -416,7 +416,7 @@ impl ShredIndexNext {
         let (word_idx, mask) = Self::index_and_mask(index);
 
         if self.index[word_idx] & mask != 0 {
-            self.index[word_idx] &= !mask;
+            self.index[word_idx] ^= mask;
             self.num_shreds -= 1;
         }
     }
