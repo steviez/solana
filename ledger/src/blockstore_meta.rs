@@ -399,8 +399,10 @@ impl ShredIndexNext {
     }
 
     fn index_and_mask(index: u64) -> (usize, u64) {
-        let word_idx = (index / 64) as usize;
-        let bit_idx = index % 64;
+        // index / 64
+        let word_idx = (index >> 6) as usize;
+        // index % 64
+        let bit_idx = index & 63;
         let mask = 1 << bit_idx;
         (word_idx, mask)
     }
