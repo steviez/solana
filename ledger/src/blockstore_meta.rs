@@ -310,7 +310,7 @@ impl ShredIndex {
     }
 }
 
-const MAX_U64S_PER_SLOT: usize = MAX_DATA_SHREDS_PER_SLOT / 64;
+const MAX_U64S_PER_SLOT: usize = (MAX_DATA_SHREDS_PER_SLOT + 63) / 64;
 
 /// A bit array of shred indices, where each u64 represents 64 shred indices.
 ///
