@@ -1024,7 +1024,7 @@ mod test {
     }
 
     #[test]
-    fn test_shred_index_next_boundary_conditions() {
+    fn test_shred_index_v2_boundary_conditions() {
         let mut index = ShredIndexV2::default();
 
         // First possible index
