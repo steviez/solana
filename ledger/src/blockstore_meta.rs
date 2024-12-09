@@ -310,7 +310,8 @@ impl ShredIndex {
     }
 }
 
-const MAX_U64S_PER_SLOT: usize = (MAX_DATA_SHREDS_PER_SLOT + 63) / 64;
+const NUM_U64_PER_SHRED_INDEX_V2: usize = (MAX_DATA_SHREDS_PER_SLOT + 63) / 64;
+type ShredIndexV2Inner = [u64; NUM_U64_PER_SHRED_INDEX_V2];
 
 /// A bit array of shred indices, where each u64 represents 64 shred indices.
 ///
@@ -331,14 +332,14 @@ const MAX_U64S_PER_SLOT: usize = (MAX_DATA_SHREDS_PER_SLOT + 63) / 64;
 ///   serialization/deserialization without tree reconstruction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShredIndexV2 {
-    index: [u64; MAX_U64S_PER_SLOT],
+    index: ShredIndexV2Inner,
     num_shreds: usize,
 }
 
 impl Default for ShredIndexV2 {
     fn default() -> Self {
         Self {
-            index: [0; MAX_U64S_PER_SLOT],
+            index: [0; NUM_U64_PER_SHRED_INDEX_V2],
             num_shreds: 0,
         }
     }
@@ -369,7 +370,7 @@ impl Serialize for ShredIndexV2 {
         tuple.serialize_element(&serde_bytes::Bytes::new(unsafe {
             std::slice::from_raw_parts(
                 &self.index as *const _ as *const u8,
-                std::mem::size_of::<[u64; MAX_U64S_PER_SLOT]>(),
+                std::mem::size_of::<ShredIndexV2Inner>(),
             )
         }))?;
         tuple.serialize_element(&self.num_shreds)?;
@@ -387,10 +388,10 @@ impl<'de> Deserialize<'de> for ShredIndexV2 {
         // versions that had fewer shreds per slot. This is safe because smaller sets are stored in
         // our fixed array with any remaining space automatically zeroed. This approach ensures we can
         // read data from any previous version while enforcing a maximum size limit.
-        if bytes.len() > std::mem::size_of::<[u64; MAX_U64S_PER_SLOT]>() {
+        if bytes.len() > std::mem::size_of::<ShredIndexV2Inner>() {
             return Err(serde::de::Error::custom("input too large"));
         }
-        let mut index = [0u64; MAX_U64S_PER_SLOT];
+        let mut index = [0u64; NUM_U64_PER_SHRED_INDEX_V2];
         bytes.chunks_exact(8).enumerate().for_each(|(i, chunk)| {
             // Unwrap is safe because `chunks_exact` guarantees the length
             index[i] = u64::from_ne_bytes(chunk.try_into().unwrap());
@@ -507,7 +508,7 @@ impl ShredIndexV2 {
             Bound::Unbounded => MAX_DATA_SHREDS_PER_SLOT as u64,
         };
 
-        let end_word: usize = ((end + 63) / 64).min(MAX_U64S_PER_SLOT as u64) as usize;
+        let end_word: usize = ((end + 63) / 64).min(NUM_U64_PER_SHRED_INDEX_V2 as u64) as usize;
         let start_word = ((start / 64) as usize).min(end_word);
 
         self.index[start_word..end_word]
