@@ -554,11 +554,11 @@ impl ShredIndexV2 {
 
 impl FromIterator<u64> for ShredIndexV2 {
     fn from_iter<T: IntoIterator<Item = u64>>(iter: T) -> Self {
-        let mut next_index = ShredIndexV2::default();
+        let mut index = ShredIndexV2::default();
         for idx in iter {
-            next_index.insert(idx);
+            index.insert(idx);
         }
-        next_index
+        index
     }
 }
 
@@ -962,7 +962,7 @@ mod test {
     }
 
     #[test]
-    fn shred_index_next_serde() {
+    fn shred_index_v2_serde() {
         let index: ShredIndexV2 = (0..MAX_DATA_SHREDS_PER_SLOT as u64).skip(3).collect();
         let serialized = bincode::serialize(&index).unwrap();
         let deserialized = bincode::deserialize::<ShredIndexV2>(&serialized).unwrap();
@@ -983,7 +983,7 @@ mod test {
     }
 
     #[test]
-    fn shred_index_next_collision() {
+    fn shred_index_v2_collision() {
         let index = ShredIndexV2::default();
         let serialized = bincode::serialize(&index).unwrap();
         let deserialized = bincode::deserialize::<ShredIndex>(&serialized);
@@ -999,27 +999,27 @@ mod test {
     fn shred_index_legacy_compat() {
         use rand::Rng;
         let mut legacy = ShredIndex::default();
-        let mut next_index = ShredIndexV2::default();
+        let mut v2 = ShredIndexV2::default();
 
         for i in (0..MAX_DATA_SHREDS_PER_SLOT as u64).skip(3) {
-            next_index.insert(i);
+            v2.insert(i);
             legacy.insert(i);
         }
 
         for &i in legacy.index.iter() {
-            assert!(next_index.contains(i));
+            assert!(v2.contains(i));
         }
 
-        assert_eq!(next_index.num_shreds(), legacy.num_shreds());
+        assert_eq!(v2.num_shreds(), legacy.num_shreds());
 
         let rand_range = rand::thread_rng().gen_range(1000..MAX_DATA_SHREDS_PER_SLOT as u64);
         assert_eq!(
-            next_index.range(0..rand_range).sum::<u64>(),
+            v2.range(0..rand_range).sum::<u64>(),
             legacy.range(0..rand_range).sum::<u64>()
         );
 
-        assert_eq!(ShredIndexV2::from(legacy.clone()), next_index);
-        assert_eq!(ShredIndex::from(next_index), legacy);
+        assert_eq!(ShredIndexV2::from(legacy.clone()), v2);
+        assert_eq!(ShredIndex::from(v2), legacy);
     }
 
     #[test]
