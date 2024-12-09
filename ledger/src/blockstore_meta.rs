@@ -304,7 +304,7 @@ impl ShredIndex {
         self.index.insert(index);
     }
 
-    #[allow(unused)]
+    #[cfg(test)]
     fn remove(&mut self, index: u64) {
         self.index.remove(&index);
     }
@@ -414,7 +414,7 @@ impl ShredIndexV2 {
         (word_idx, mask)
     }
 
-    #[allow(unused)]
+    #[cfg(test)]
     fn remove(&mut self, index: u64) {
         assert!(
             index < MAX_DATA_SHREDS_PER_SLOT as u64,
