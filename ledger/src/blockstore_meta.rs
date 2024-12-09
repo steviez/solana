@@ -1063,6 +1063,19 @@ mod test {
         let oversized_range = index.range(0..MAX_DATA_SHREDS_PER_SLOT as u64 + 1);
         assert_eq!(oversized_range.count(), 5);
         assert_eq!(index.num_shreds(), 5);
+
+        index.remove(0);
+        assert!(!index.contains(0));
+        index.remove(63);
+        assert!(!index.contains(63));
+        index.remove(64);
+        assert!(!index.contains(64));
+        index.remove(127);
+        assert!(!index.contains(127));
+        index.remove(MAX_DATA_SHREDS_PER_SLOT as u64 - 1);
+        assert!(!index.contains(MAX_DATA_SHREDS_PER_SLOT as u64 - 1));
+
+        assert_eq!(index.num_shreds(), 0);
     }
 
     #[test]
