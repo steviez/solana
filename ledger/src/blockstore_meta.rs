@@ -349,6 +349,9 @@ impl Serialize for ShredIndexV2 {
     where
         S: serde::Serializer,
     {
+        use serde::ser::SerializeTuple;
+
+        let mut tuple = serializer.serialize_tuple(2)?;
         // SAFETY: This is safe because:
         // 1. Memory initialization & layout:
         //    - index is a fixed-size array [u64; MAX_U64S_PER_SLOT] fully initialized
@@ -363,12 +366,14 @@ impl Serialize for ShredIndexV2 {
         //    - slice lifetime is tied to &self and is read-only
         //
         // Note: Deserialization will validate the byte length and safely reconstruct the u64 array
-        serializer.serialize_bytes(unsafe {
+        tuple.serialize_element(&serde_bytes::Bytes::new(unsafe {
             std::slice::from_raw_parts(
                 &self.index as *const _ as *const u8,
                 std::mem::size_of::<[u64; MAX_U64S_PER_SLOT]>(),
             )
-        })
+        }))?;
+        tuple.serialize_element(&self.num_shreds)?;
+        tuple.end()
     }
 }
 
@@ -377,7 +382,7 @@ impl<'de> Deserialize<'de> for ShredIndexV2 {
     where
         D: serde::Deserializer<'de>,
     {
-        let bytes = <&[u8]>::deserialize(deserializer)?;
+        let (bytes, num_shreds) = <(&[u8], usize)>::deserialize(deserializer)?;
         // Accept input smaller than our current fixed array size to maintain compatibility with older
         // versions that had fewer shreds per slot. This is safe because smaller sets are stored in
         // our fixed array with any remaining space automatically zeroed. This approach ensures we can
@@ -390,10 +395,7 @@ impl<'de> Deserialize<'de> for ShredIndexV2 {
             // Unwrap is safe because `chunks_exact` guarantees the length
             index[i] = u64::from_ne_bytes(chunk.try_into().unwrap());
         });
-        Ok(Self {
-            index,
-            num_shreds: index.iter().map(|x| x.count_ones() as usize).sum(),
-        })
+        Ok(Self { index, num_shreds })
     }
 }
 
