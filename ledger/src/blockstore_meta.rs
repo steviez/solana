@@ -315,7 +315,7 @@ type ShredIndexV2Inner = [u64; NUM_U64_PER_SHRED_INDEX_V2];
 
 /// A bit array of shred indices, where each u64 represents 64 shred indices.
 ///
-/// The current implementation of [`ShredIndexLegacy`] utilizes a [`BTreeSet`] to store
+/// The current implementation of [`ShredIndex`] utilizes a [`BTreeSet`] to store
 /// shred indices. While [`BTreeSet`] remains efficient as operations are amortized
 /// over time, the overhead of the B-tree structure becomes significant when frequently
 /// serialized and deserialized. In particular:
