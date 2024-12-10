@@ -11,6 +11,7 @@ use {
     },
     std::{
         collections::BTreeSet,
+        mem::MaybeUninit,
         ops::{Bound, Range, RangeBounds},
     },
 };
@@ -353,26 +354,41 @@ impl Serialize for ShredIndexV2 {
         use serde::ser::SerializeTuple;
 
         let mut tuple = serializer.serialize_tuple(2)?;
+        // Purpose:
+        // - Serialize `self.index` (a `[u64; NUM_U64_PER_SHRED_INDEX_V2]` array) into a fixed-size buffer as little-endian bytes.
+        //
         // SAFETY: This is safe because:
-        // 1. Memory initialization & layout:
-        //    - index is a fixed-size array [u64; MAX_U64S_PER_SLOT] fully initialized
-        //      at construction and never contains uninitialized memory
-        //    - array elements are contiguous with no padding
+        // 1. Memory Layout:
+        // - The buffer is sized to `std::mem::size_of::<[u64; NUM_U64_PER_SHRED_INDEX_V2]>()`, matching the source data size.
+        // - Each `u64` is serialized into 8 bytes, ensuring no padding or overflow.
         //
-        // 2. Size & alignment:
-        //    - size_of::<[u64; MAX_U64S_PER_SLOT]> is exactly (8 * MAX_U64S_PER_SLOT) bytes
-        //    - &self.index is u64-aligned, which satisfies u8 alignment
+        // 2. Pointer Safety:
+        // - `dst` is derived from `buffer.as_mut_ptr()` and points to valid, uninitialized memory.
+        // - The offsets `dst.add(i * 8)` are always within bounds because:
+        //   - `i` ranges from `0` to `NUM_U64_PER_SHRED_INDEX_V2 - 1`.
+        //   - The total size of the buffer is sufficient to accommodate all writes.
         //
-        // 3. Lifetime:
-        //    - slice lifetime is tied to &self and is read-only
+        // 3. Alignment:
+        // - `dst` is `u8`-aligned from `buffer.as_mut_ptr()`.
+        // - Writing 8 bytes per iteration (`[u8; 8]` from `to_le_bytes()`) respects alignment requirements.
         //
-        // Note: Deserialization will validate the byte length and safely reconstruct the u64 array
-        tuple.serialize_element(&serde_bytes::Bytes::new(unsafe {
-            std::slice::from_raw_parts(
-                &self.index as *const _ as *const u8,
-                std::mem::size_of::<ShredIndexV2Inner>(),
-            )
-        }))?;
+        // 4. Initialization:
+        // - Each 8-byte chunk is written exactly once using `std::ptr::write`, fully initializing the buffer.
+        // - After the loop, the buffer is guaranteed to be completely initialized, making `assume_init()` safe.
+        //
+        // Notes:
+        // - Serialization uses little-endian order for portability.
+        let buffer = unsafe {
+            let mut buffer =
+                MaybeUninit::<[u8; std::mem::size_of::<ShredIndexV2Inner>()]>::uninit();
+            let dst = buffer.as_mut_ptr() as *mut u8;
+            for (i, &word) in self.index.iter().enumerate() {
+                // Explicitly convert to LE bytes
+                std::ptr::write(dst.add(i * 8) as *mut [u8; 8], word.to_le_bytes());
+            }
+            buffer.assume_init()
+        };
+        tuple.serialize_element(serde_bytes::Bytes::new(&buffer))?;
         tuple.serialize_element(&self.num_shreds)?;
         tuple.end()
     }
@@ -384,19 +400,65 @@ impl<'de> Deserialize<'de> for ShredIndexV2 {
         D: serde::Deserializer<'de>,
     {
         let (bytes, num_shreds) = <(&[u8], usize)>::deserialize(deserializer)?;
+        let total_size = std::mem::size_of::<ShredIndexV2Inner>();
         // Accept input smaller than our current fixed array size to maintain compatibility with older
         // versions that had fewer shreds per slot. This is safe because smaller sets are stored in
         // our fixed array with any remaining space automatically zeroed. This approach ensures we can
         // read data from any previous version while enforcing a maximum size limit.
-        if bytes.len() > std::mem::size_of::<ShredIndexV2Inner>() {
+        if bytes.len() > total_size {
             return Err(serde::de::Error::custom("input too large"));
         }
-        let mut index = [0u64; NUM_U64_PER_SHRED_INDEX_V2];
-        bytes.chunks_exact(8).enumerate().for_each(|(i, chunk)| {
-            // Unwrap is safe because `chunks_exact` guarantees the length
-            index[i] = u64::from_ne_bytes(chunk.try_into().unwrap());
-        });
-        Ok(Self { index, num_shreds })
+        if bytes.is_empty() {
+            return Err(serde::de::Error::custom("input is empty"));
+        }
+
+        let mut buffer = MaybeUninit::<ShredIndexV2Inner>::uninit();
+        let remaining_bytes = total_size - bytes.len();
+
+        // SAFETY: This operation is safe because:
+        //
+        // 1. Memory Layout:
+        // - The buffer size matches `std::mem::size_of::<ShredIndexV2Inner>()`.
+        // - `bytes.len()` is checked to ensure it does not exceed `total_size`.
+        //
+        // 2. Pointer Safety:
+        // - `buffer` is a fresh `MaybeUninit`, ensuring no aliasing or invalid memory access.
+        // - `ptr.add(i)` is always within bounds as `i` comes from `bytes.chunks_exact(8).enumerate()`.
+        //
+        // 3. Alignment:
+        // - `buffer.as_mut_ptr()` is aligned for `u64`, matching the type of `ShredIndexV2Inner`.
+        // - Writing `u64` values respects alignment requirements.
+        //
+        // 4. Initialization:
+        // - Each `u64` in the buffer is initialized from 8-byte chunks of `bytes` using `u64::from_le_bytes`.
+        // - Remaining bytes are zeroed with `std::ptr::write_bytes`.
+        // - After the loop, the buffer is fully initialized, making `assume_init()` safe.
+        //
+        // 5. Compatibility:
+        // - Allows smaller inputs (`bytes.len() < total_size`) by zero-filling unused space to maintain backward compatibility.
+        unsafe {
+            let ptr = buffer.as_mut_ptr() as *mut u64;
+            // Write input bytes, converting to LE.
+            for (i, byte) in bytes.chunks_exact(8).enumerate() {
+                std::ptr::write(
+                    ptr.add(i),
+                    // SAFETY: chunks_exact(8) guarantees 8 bytes.
+                    u64::from_le_bytes(byte.try_into().unwrap_unchecked()),
+                );
+            }
+
+            // Zero remaining bytes
+            std::ptr::write_bytes(
+                (buffer.as_mut_ptr() as *mut u8).add(bytes.len()),
+                0,
+                remaining_bytes,
+            );
+
+            Ok(Self {
+                index: buffer.assume_init(),
+                num_shreds,
+            })
+        }
     }
 }
 
