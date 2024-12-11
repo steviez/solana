@@ -1086,6 +1086,44 @@ mod test {
     }
 
     #[test]
+    fn test_shred_index_v2_range_bounds() {
+        let mut index = ShredIndexV2::default();
+
+        index.insert(10);
+        index.insert(20);
+        index.insert(30);
+        index.insert(40);
+
+        use std::ops::Bound::*;
+
+        // Test all combinations of bounds
+        let test_cases = [
+            // (start_bound, end_bound, expected_result)
+            (Included(10), Included(30), vec![10, 20, 30]),
+            (Included(10), Excluded(30), vec![10, 20]),
+            (Excluded(10), Included(30), vec![20, 30]),
+            (Excluded(10), Excluded(30), vec![20]),
+            // Unbounded start
+            (Unbounded, Included(20), vec![10, 20]),
+            (Unbounded, Excluded(20), vec![10]),
+            // Unbounded end
+            (Included(30), Unbounded, vec![30, 40]),
+            (Excluded(30), Unbounded, vec![40]),
+            // Both Unbounded
+            (Unbounded, Unbounded, vec![10, 20, 30, 40]),
+        ];
+
+        for (start_bound, end_bound, expected) in test_cases {
+            let result: Vec<_> = index.range((start_bound, end_bound)).collect();
+            assert_eq!(
+                result, expected,
+                "Failed for bounds: start={:?}, end={:?}",
+                start_bound, end_bound
+            );
+        }
+    }
+
+    #[test]
     fn test_shred_index_v2_boundary_conditions() {
         let mut index = ShredIndexV2::default();
 
