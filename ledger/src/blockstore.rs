@@ -2497,11 +2497,12 @@ impl Blockstore {
         // This allows safe downgrade to Release 1 since it can read both formats
         // https://github.com/anza-xyz/agave/issues/3570
         self.index_cf.get_with(slot, |slice| {
-            // Version compatibility note: Index and IndexV2 use different serialization strategies
-            // that make their formats naturally distinguishable. ShredIndexV2 serializes u64s as
-            // raw bytes (16 bytes for two u64s), while the original format serializes them as a
-            // collection (2 bytes for two u64s). This difference in length prevents any risk of
-            // misinterpreting data between versions without needing explicit version tags.
+            // Version compatibility note: Index and IndexV2 use different serialization
+            // strategies in their ShredIndex field that make their formats naturally distinguishable.
+            //
+            // For example, serializing two `u64`s:
+            // - ShredIndexV2 serializes as a collection of bytes, with a length prefix of 16.
+            // - ShredIndex serializes as a collection of u64s, with a length prefix of 2.
             let index: bincode::Result<Index> = bincode::deserialize(slice);
             match index {
                 Ok(index) => Ok(index),
