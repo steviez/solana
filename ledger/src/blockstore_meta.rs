@@ -9,6 +9,7 @@ use {
         clock::{Slot, UnixTimestamp},
         hash::Hash,
     },
+    static_assertions::const_assert,
     std::{
         collections::BTreeSet,
         mem::MaybeUninit,
@@ -311,7 +312,30 @@ impl ShredIndex {
     }
 }
 
-const NUM_U64_PER_SHRED_INDEX_V2: usize = (MAX_DATA_SHREDS_PER_SLOT + 63) / 64;
+/// Number of `u64`s required to accommodate each shred in a slot ([`MAX_DATA_SHREDS_PER_SLOT`]).
+///
+/// **THIS VALUE MUST NEVER DECREASE ONCE ROLLED OUT.**
+///
+/// As it relates to deserializing from the blockstore, using a statically sized structure
+/// can trivially accommodate increases in space, but decreases are problematic. For example,
+///
+/// Increase case:
+/// - Assume `MAX_DATA_SHREDS_PER_SLOT` was bumped from `32_768` to `65_536`.
+/// - Assume data being deserialized was written when `MAX_DATA_SHREDS_PER_SLOT` was `32_768`.
+/// - ✅ No issue, as `ShredIndexV2Inner` has extra space that can be zeroed to accommodate.
+///
+/// Decrease case:
+/// - Assume `MAX_DATA_SHREDS_PER_SLOT` was reduced from  `65_536` to `32_768`.
+/// - Assume data being deserialized was written when `MAX_DATA_SHREDS_PER_SLOT` was `65_536`.
+/// - ❌ `ShredIndexV2Inner` only has space to accommodate `32_768` shreds.
+///
+/// As such, we:
+/// - Decouple the definition of `NUM_U64_PER_SHRED_INDEX_V2` from `MAX_DATA_SHREDS_PER_SLOT`.
+///   (i.e., make it not an explicit function of)
+/// - Impose a compile time check to ensure that `NUM_U64_PER_SHRED_INDEX_V2 >= (MAX_DATA_SHREDS_PER_SLOT + 63) / 64`.
+/// - Impose a convention that `NUM_U64_PER_SHRED_INDEX_V2` must never decrease.
+const NUM_U64_PER_SHRED_INDEX_V2: usize = 512;
+const_assert!(NUM_U64_PER_SHRED_INDEX_V2 >= (MAX_DATA_SHREDS_PER_SLOT + 63) / 64);
 type ShredIndexV2Inner = [u64; NUM_U64_PER_SHRED_INDEX_V2];
 
 /// A bit array of shred indices, where each u64 represents 64 shred indices.
