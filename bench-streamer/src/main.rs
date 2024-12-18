@@ -42,13 +42,12 @@ fn producer(addr: &SocketAddr, exit: Arc<AtomicBool>) -> JoinHandle<()> {
             })
             .collect();
 
-        loop {
-            if exit.load(Ordering::Relaxed) {
-                return;
-            }
-
+        let mut num_packets_sent = 0;
+        while !exit.load(Ordering::Relaxed) {
             sendmmsg::batch_send(&send, &packets_and_addrs).unwrap();
+            num_packets_sent += batch_size;
         }
+        println!("{num_packets_sent} packets sent");
     })
 }
 
