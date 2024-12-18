@@ -133,15 +133,19 @@ impl IndexV2 {
         }
     }
 
+    #[inline]
     pub fn data(&self) -> &ShredIndexV2 {
         &self.data
     }
+    #[inline]
     pub fn data_mut(&mut self) -> &mut ShredIndexV2 {
         &mut self.data
     }
+    #[inline]
     pub fn coding(&self) -> &ShredIndexV2 {
         &self.coding
     }
+    #[inline]
     pub fn coding_mut(&mut self) -> &mut ShredIndexV2 {
         &mut self.coding
     }
@@ -538,7 +542,7 @@ impl ShredIndexV2 {
         }
     }
 
-    #[allow(unused)]
+    #[inline]
     pub(crate) fn contains(&self, idx: u64) -> bool {
         if idx >= MAX_DATA_SHREDS_PER_SLOT as u64 {
             return false;
