@@ -269,7 +269,7 @@ pub struct Blockstore {
 }
 
 pub struct IndexMetaWorkingSetEntry {
-    index: Index,
+    index: IndexV2,
     // true only if at least one shred for this Index was inserted since the time this
     // struct was created
     did_insert_occur: bool,
@@ -761,7 +761,7 @@ impl Blockstore {
 
     fn get_recovery_data_shreds<'a>(
         &'a self,
-        index: &'a Index,
+        index: &'a IndexV2,
         slot: Slot,
         erasure_meta: &'a ErasureMeta,
         prev_inserted_shreds: &'a HashMap<ShredId, Shred>,
@@ -790,7 +790,7 @@ impl Blockstore {
 
     fn get_recovery_coding_shreds<'a>(
         &'a self,
-        index: &'a Index,
+        index: &'a IndexV2,
         slot: Slot,
         erasure_meta: &'a ErasureMeta,
         prev_inserted_shreds: &'a HashMap<ShredId, Shred>,
@@ -819,7 +819,7 @@ impl Blockstore {
 
     fn recover_shreds(
         &self,
-        index: &Index,
+        index: &IndexV2,
         erasure_meta: &ErasureMeta,
         prev_inserted_shreds: &HashMap<ShredId, Shred>,
         recovered_shreds: &mut Vec<Shred>,
@@ -1805,7 +1805,7 @@ impl Blockstore {
 
     fn insert_coding_shred(
         &self,
-        index_meta: &mut Index,
+        index_meta: &mut IndexV2,
         shred: &Shred,
         write_batch: &mut WriteBatch,
     ) -> Result<()> {
@@ -1826,7 +1826,7 @@ impl Blockstore {
         Ok(())
     }
 
-    fn is_data_shred_present(shred: &Shred, slot_meta: &SlotMeta, data_index: &ShredIndex) -> bool {
+    fn is_data_shred_present(shred: &Shred, slot_meta: &SlotMeta, data_index: &ShredIndexV2) -> bool {
         let shred_index = u64::from(shred.index());
         // Check that the shred doesn't already exist in blockstore
         shred_index < slot_meta.consumed || data_index.contains(shred_index)
@@ -2245,7 +2245,7 @@ impl Blockstore {
     fn insert_data_shred(
         &self,
         slot_meta: &mut SlotMeta,
-        data_index: &mut ShredIndex,
+        data_index: &mut ShredIndexV2,
         shred: &Shred,
         write_batch: &mut WriteBatch,
         shred_source: ShredSource,
@@ -2489,7 +2489,7 @@ impl Blockstore {
         Ok(num_data)
     }
 
-    pub fn get_index(&self, slot: Slot) -> Result<Option<Index>> {
+    pub fn get_index(&self, slot: Slot) -> Result<Option<IndexV2>> {
         // Migration strategy for new column format:
         // 1. Release 1: Add ability to read new format as fallback, keep writing old format
         // 2. Release 2: Switch to writing new format, keep reading old format as fallback
@@ -2503,11 +2503,11 @@ impl Blockstore {
             // For example, serializing two `u64`s:
             // - ShredIndexV2 serializes as a collection of bytes, with a length prefix of 16.
             // - ShredIndex serializes as a collection of u64s, with a length prefix of 2.
-            let index: bincode::Result<Index> = bincode::deserialize(slice);
+            let index: bincode::Result<IndexV2> = bincode::deserialize(slice);
             match index {
                 Ok(index) => Ok(index),
                 Err(_) => {
-                    let index: IndexV2 = bincode::deserialize(slice)?;
+                    let index: Index = bincode::deserialize(slice)?;
                     Ok(index.into())
                 }
             }
@@ -4778,7 +4778,7 @@ impl Blockstore {
             let newly_inserted_meta = self
                 .get_index(slot)
                 .unwrap()
-                .unwrap_or_else(|| Index::new(slot));
+                .unwrap_or_else(|| IndexV2::new(slot));
             IndexMetaWorkingSetEntry {
                 index: newly_inserted_meta,
                 did_insert_occur: false,
@@ -4804,7 +4804,7 @@ impl Blockstore {
 fn update_completed_data_indexes(
     is_last_in_data: bool,
     new_shred_index: u32,
-    received_data_shreds: &ShredIndex,
+    received_data_shreds: &ShredIndexV2,
     // Shreds indices which are marked data complete.
     completed_data_indexes: &mut BTreeSet<u32>,
 ) -> Vec<(u32, u32)> {
@@ -4843,7 +4843,7 @@ fn update_slot_meta(
     index: u32,
     new_consumed: u64,
     reference_tick: u8,
-    received_data_shreds: &ShredIndex,
+    received_data_shreds: &ShredIndexV2,
 ) -> Vec<(u32, u32)> {
     let first_insert = slot_meta.received == 0;
     // Index is zero-indexed, while the "received" height starts from 1,

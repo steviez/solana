@@ -120,8 +120,31 @@ pub struct Index {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct IndexV2 {
     pub slot: Slot,
-    data: ShredIndexV2,
-    coding: ShredIndexV2,
+    pub data: ShredIndexV2,
+    pub coding: ShredIndexV2,
+}
+
+impl IndexV2 {
+    pub fn new(slot: Slot) -> Self {
+        Self {
+            slot,
+            data: ShredIndexV2::default(),
+            coding: ShredIndexV2::default(),
+        }
+    }
+
+    pub fn data(&self) -> &ShredIndexV2 {
+        &self.data
+    }
+    pub fn data_mut(&mut self) -> &mut ShredIndexV2 {
+        &mut self.data
+    }
+    pub fn coding(&self) -> &ShredIndexV2 {
+        &self.coding
+    }
+    pub fn coding_mut(&mut self) -> &mut ShredIndexV2 {
+        &mut self.coding
+    }
 }
 
 impl From<IndexV2> for Index {
@@ -831,7 +854,7 @@ impl ErasureMeta {
         self.fec_set_index.checked_add(num_data)
     }
 
-    pub(crate) fn status(&self, index: &Index) -> ErasureMetaStatus {
+    pub(crate) fn status(&self, index: &IndexV2) -> ErasureMetaStatus {
         use ErasureMetaStatus::*;
 
         let num_coding = index.coding().range(self.coding_shreds_indices()).count();

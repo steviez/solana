@@ -1208,7 +1208,7 @@ impl ColumnName for columns::Index {
     const NAME: &'static str = INDEX_CF;
 }
 impl TypedColumn for columns::Index {
-    type Type = blockstore_meta::Index;
+    type Type = blockstore_meta::IndexV2;
 }
 
 impl SlotColumn for columns::DeadSlots {}
