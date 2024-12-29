@@ -6,7 +6,7 @@ use {
     solana_net_utils::{bind_to_unspecified, SocketConfig},
     solana_streamer::{
         packet::{Packet, PacketBatch, PacketBatchRecycler, PACKET_DATA_SIZE},
-        sendmmsg::self,
+        sendmmsg,
         streamer::{receiver, PacketBatchReceiver, StreamerReceiveStats},
     },
     std::{
@@ -21,7 +21,7 @@ use {
     },
 };
 
-fn producer(addr: &SocketAddr, exit: Arc<AtomicBool>) -> JoinHandle<()> {
+fn producer(addr: &SocketAddr, exit: Arc<AtomicBool>) -> JoinHandle<usize> {
     let send = bind_to_unspecified().unwrap();
 
     let batch_size = 1024;
@@ -42,13 +42,12 @@ fn producer(addr: &SocketAddr, exit: Arc<AtomicBool>) -> JoinHandle<()> {
             })
             .collect();
 
-        loop {
-            if exit.load(Ordering::Relaxed) {
-                return;
-            }
-
+        let mut num_packets_sent = 0;
+        while !exit.load(Ordering::Relaxed) {
             sendmmsg::batch_send(&send, &packets_and_addrs).unwrap();
+            num_packets_sent += batch_size;
         }
+        num_packets_sent
     })
 }
 
@@ -151,9 +150,16 @@ fn main() -> Result<()> {
     for t_reader in read_threads {
         t_reader.join()?;
     }
-    for t_producer in producer_threads {
-        t_producer.join()?;
-    }
+
+    let producer_packet_counts: Vec<_> = producer_threads
+        .into_iter()
+        .map(|thread_handle| thread_handle.join().unwrap())
+        .collect();
+    println!(
+        "packet production by producer: {:?}",
+        producer_packet_counts
+    );
+
     for t_sink in sink_threads {
         t_sink.join()?;
     }
