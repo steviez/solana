@@ -17,7 +17,7 @@ use {
             Arc,
         },
         thread::{sleep, spawn, JoinHandle, Result},
-        time::{Duration, SystemTime},
+        time::{Duration, Instant},
     },
 };
 
@@ -137,16 +137,19 @@ fn main() -> Result<()> {
         .into_iter()
         .map(|r_reader| sink(exit.clone(), rvs.clone(), r_reader))
         .collect();
-    let start = SystemTime::now();
+
+    let start = Instant::now();
+    // The threads are already running, so measure now to subtract out later
     let start_val = rvs.load(Ordering::Relaxed);
     sleep(Duration::new(5, 0));
-    let elapsed = start.elapsed().unwrap();
+    let elapsed = start.elapsed();
     let end_val = rvs.load(Ordering::Relaxed);
-    let time = elapsed.as_secs() * 10_000_000_000 + u64::from(elapsed.subsec_nanos());
-    let ftime = (time as f64) / 10_000_000_000_f64;
-    let fcount = (end_val - start_val) as f64;
-    println!("performance: {:?}", fcount / ftime);
+
+    let packet_per_second = (end_val - start_val) as f64 / elapsed.as_secs_f64();
+    println!("packets received per second: {:?}", packet_per_second);
+
     exit.store(true, Ordering::Relaxed);
+
     for t_reader in read_threads {
         t_reader.join()?;
     }
