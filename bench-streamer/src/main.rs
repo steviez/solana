@@ -24,7 +24,7 @@ use {
 fn producer(addr: &SocketAddr, exit: Arc<AtomicBool>) -> JoinHandle<()> {
     let send = bind_to_unspecified().unwrap();
 
-    let batch_size = 10;
+    let batch_size = 1024;
     let mut packet_batch = PacketBatch::with_capacity(batch_size);
     packet_batch.resize(batch_size, Packet::default());
     for w in packet_batch.iter_mut() {
