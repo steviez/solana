@@ -3,7 +3,7 @@
 use {
     clap::{crate_description, crate_name, Arg, Command},
     crossbeam_channel::unbounded,
-    solana_net_utils::{bind_to_unspecified, SocketConfig},
+    solana_net_utils::{bind_to_with_config, SocketConfig},
     solana_streamer::{
         packet::{Packet, PacketBatch, PacketBatchRecycler, PACKET_DATA_SIZE},
         sendmmsg,
@@ -22,7 +22,10 @@ use {
 };
 
 fn producer(addr: &SocketAddr, exit: Arc<AtomicBool>) -> JoinHandle<usize> {
-    let send = bind_to_unspecified().unwrap();
+    let config = SocketConfig::default()
+        .send_buffer_size(1024 * 1024 * 1024)
+        .reuseport(false);
+    let send = bind_to_with_config(IpAddr::V4(Ipv4Addr::UNSPECIFIED), /*port:*/ 0, config).unwrap();
 
     let batch_size = 1024;
     let mut packet_batch = PacketBatch::with_capacity(batch_size);
