@@ -6,6 +6,7 @@ use {
         blockstore::{Blockstore, BlockstoreError},
         blockstore_processor::{TransactionStatusBatch, TransactionStatusMessage},
     },
+    solana_measure::measure::Measure,
     solana_svm::transaction_commit_result::CommittedTransaction,
     solana_transaction_status::{
         extract_and_fmt_memos, map_inner_instructions, Reward, TransactionStatusMeta,
@@ -16,7 +17,7 @@ use {
             Arc,
         },
         thread::{self, Builder, JoinHandle},
-        time::Duration,
+        time::{Duration, Instant},
     },
 };
 
@@ -30,6 +31,34 @@ pub struct TransactionStatusService {
     thread_hdl: JoinHandle<()>,
     #[cfg(feature = "dev-context-only-utils")]
     transaction_status_receiver: Arc<Receiver<TransactionStatusMessage>>,
+}
+
+#[derive(Default)]
+struct TransactionStatusServiceStats {
+    prepare_tx_elapsed_us: u64,
+    commit_tx_elapsed_us: u64,
+}
+
+impl TransactionStatusServiceStats {
+    fn report_metrics(&self) {
+        // Bail if empty
+        if self.prepare_tx_elapsed_us == 0 {
+            return;
+        }
+        datapoint_info!(
+            "transaction_status_service",
+            (
+                "prepare_tx_elapsed_us",
+                self.prepare_tx_elapsed_us as i64,
+                i64
+            ),
+            (
+                "commit_tx_elapsed_us",
+                self.commit_tx_elapsed_us as i64,
+                i64
+            ),
+        );
+    }
 }
 
 impl TransactionStatusService {
@@ -49,6 +78,10 @@ impl TransactionStatusService {
             .name("solTxStatusWrtr".to_string())
             .spawn(move || {
                 info!("TransactionStatusService has started");
+                let mut stats = TransactionStatusServiceStats::default();
+                let mut last_stats_submit = Instant::now();
+                const STATS_SUBMIT_CADENCE: Duration = Duration::from_secs(2);
+
                 loop {
                     if exit.load(Ordering::Relaxed) {
                         break;
@@ -72,6 +105,7 @@ impl TransactionStatusService {
                         enable_rpc_transaction_history,
                         transaction_notifier.clone(),
                         &blockstore,
+                        &mut stats,
                         enable_extended_tx_metadata_storage,
                     ) {
                         Ok(_) => {}
@@ -80,6 +114,12 @@ impl TransactionStatusService {
                             exit.store(true, Ordering::Relaxed);
                             break;
                         }
+                    }
+
+                    if last_stats_submit.elapsed() > STATS_SUBMIT_CADENCE {
+                        stats.report_metrics();
+                        stats = TransactionStatusServiceStats::default();
+                        last_stats_submit = Instant::now();
                     }
                 }
                 info!("TransactionStatusService has stopped");
@@ -98,6 +138,7 @@ impl TransactionStatusService {
         enable_rpc_transaction_history: bool,
         transaction_notifier: Option<TransactionNotifierArc>,
         blockstore: &Blockstore,
+        stats: &mut TransactionStatusServiceStats,
         enable_extended_tx_metadata_storage: bool,
     ) -> Result<(), BlockstoreError> {
         match transaction_status_message {
@@ -111,6 +152,7 @@ impl TransactionStatusService {
             }) => {
                 let mut status_and_memos_batch = blockstore.get_write_batch()?;
 
+                let measure_prepare = Measure::start("prepare");
                 for (
                     transaction,
                     commit_result,
@@ -221,9 +263,12 @@ impl TransactionStatusService {
                         )?;
                     }
                 }
+                stats.prepare_tx_elapsed_us += measure_prepare.end_as_us();
 
                 if enable_rpc_transaction_history {
+                    let measure_commit = Measure::start("commit");
                     blockstore.write_batch(status_and_memos_batch)?;
+                    stats.commit_tx_elapsed_us += measure_commit.end_as_us();
                 }
             }
             TransactionStatusMessage::Freeze(slot) => {
