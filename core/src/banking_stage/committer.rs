@@ -158,6 +158,7 @@ impl Committer {
                     }
                 })
                 .collect();
+            // TODO: pass costs along here
             transaction_status_sender.send_transaction_status_batch(
                 bank.slot(),
                 txs,
