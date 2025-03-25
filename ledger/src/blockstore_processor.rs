@@ -230,7 +230,7 @@ pub fn execute_batch<'a>(
             pre_commit_callback,
         )?;
 
-    get_and_check_transaction_costs(batch, bank, timings, &commit_results)?;
+    let tx_costs = get_and_check_transaction_costs(batch, bank, timings, &commit_results)?;
 
     bank_utils::find_and_send_votes(
         batch.sanitized_transactions(),
@@ -259,12 +259,21 @@ pub fn execute_batch<'a>(
         let token_balances =
             TransactionTokenBalancesSet::new(pre_token_balances, post_token_balances);
 
+        // The length of costs vector needs to be consistent with all other
+        // vectors that are sent over (such as `transactions`). So, replace the
+        // None elements with Some(0); they will be ignored
+        let tx_costs = tx_costs
+            .into_iter()
+            .map(|tx_cost_option| tx_cost_option.map(|tx_cost| tx_cost.sum()).or(Some(0)))
+            .collect();
+
         transaction_status_sender.send_transaction_status_batch(
             bank.slot(),
             transactions,
             commit_results,
             balances,
             token_balances,
+            tx_costs,
             transaction_indexes.into_owned(),
         );
     }
@@ -2214,6 +2223,7 @@ pub struct TransactionStatusBatch {
     pub commit_results: Vec<TransactionCommitResult>,
     pub balances: TransactionBalancesSet,
     pub token_balances: TransactionTokenBalancesSet,
+    pub costs: Vec<Option<u64>>,
     pub transaction_indexes: Vec<usize>,
 }
 
@@ -2230,6 +2240,7 @@ impl TransactionStatusSender {
         commit_results: Vec<TransactionCommitResult>,
         balances: TransactionBalancesSet,
         token_balances: TransactionTokenBalancesSet,
+        costs: Vec<Option<u64>>,
         transaction_indexes: Vec<usize>,
     ) {
         if let Err(e) = self
@@ -2240,6 +2251,7 @@ impl TransactionStatusSender {
                 commit_results,
                 balances,
                 token_balances,
+                costs,
                 transaction_indexes,
             }))
         {
