@@ -240,6 +240,7 @@ dependencies = [
  "solana-log-collector",
  "solana-logger",
  "solana-measure",
+ "solana-net-utils",
  "solana-program-runtime",
  "solana-rpc",
  "solana-runtime",
