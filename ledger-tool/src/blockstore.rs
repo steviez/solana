@@ -667,20 +667,48 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
         ("copy", Some(arg_matches)) => {
             let starting_slot = value_t_or_exit!(arg_matches, "starting_slot", Slot);
             let ending_slot = value_t_or_exit!(arg_matches, "ending_slot", Slot);
-            let target_db = PathBuf::from(value_t_or_exit!(arg_matches, "target_db", String));
+            //let target_db = PathBuf::from(value_t_or_exit!(arg_matches, "target_db", String));
 
             let source = crate::open_blockstore(&ledger_path, arg_matches, AccessType::Secondary);
-            let target = crate::open_blockstore(&target_db, arg_matches, AccessType::Primary);
+
+            use {
+                solana_net_utils::bind_to_unspecified,
+                solana_streamer::packet::{Packet, PacketBatch},
+                std::net::SocketAddr,
+            };
+
+            let destination_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+            let destination_port = 8002;
+            let destination_addr = SocketAddr::new(destination_ip, destination_port);
+
+            let socket = bind_to_unspecified().unwrap();
+
+            //let target = crate::open_blockstore(&target_db, arg_matches, AccessType::Primary);
 
             for (slot, _meta) in source.slot_meta_iterator(starting_slot)? {
                 if slot > ending_slot {
                     break;
                 }
-                let shreds = source.get_data_shreds_for_slot(slot, 0)?;
-                let shreds = shreds.into_iter().map(Cow::Owned);
-                if target.insert_cow_shreds(shreds, None, true).is_err() {
-                    warn!("error inserting shreds for slot {}", slot);
+                let data_shreds = source.slot_data_iterator(slot, 0)?;
+                let mut packet_batch = PacketBatch::with_capacity(1024);
+
+                for (_, shred_bytes) in data_shreds {
+                    let length = shred_bytes.len();
+
+                    let mut packet = Packet::default();
+                    packet.buffer_mut()[..length].copy_from_slice(&shred_bytes);
+                    packet.meta_mut().size = length;
+                    packet.meta_mut().set_socket_addr(&destination_addr);
+
+                    packet_batch.push(packet);
                 }
+
+                let data_and_addrs = packet_batch
+                    .iter()
+                    .map(|packet| (packet.data(..).unwrap(), packet.meta().socket_addr()));
+
+                use solana_streamer::sendmmsg::batch_send;
+                batch_send(&socket, data_and_addrs).unwrap();
             }
         }
         ("dead-slots", Some(arg_matches)) => {
