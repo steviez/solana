@@ -85,6 +85,14 @@ pub fn command<'a>() -> App<'a, 'a> {
                 .long("skip-health-check")
                 .help("Skip health check"),
         )
+        .arg(
+            Arg::with_name("pid")
+                .long("pid")
+                .takes_value(true)
+                .validator(is_parsable::<usize>)
+                .value_name("PID")
+                .help("PID to monitor"),
+        )
 }
 
 pub fn execute(matches: &ArgMatches, ledger_path: &Path) -> Result<()> {
@@ -104,6 +112,17 @@ pub fn execute(matches: &ArgMatches, ledger_path: &Path) -> Result<()> {
     let admin_client = admin_rpc_service::connect(ledger_path);
     admin_rpc_service::runtime().block_on(async move { admin_client.await?.exit().await })?;
     println!("Exit request sent");
+
+    let pid = value_t_or_exit!(matches, "pid", usize).to_string();
+    const TIMER: std::time::Duration = std::time::Duration::from_millis(500);
+    loop {
+        let threads = std::process::Command::new("ps")
+            .args(["-p", &pid, "-T"])
+            .output()
+            .unwrap();
+        println!("Active threads: {:?}", threads);
+        std::thread::sleep(TIMER);
+    }
 
     if exit_args.monitor {
         monitor::execute(matches, ledger_path)?;

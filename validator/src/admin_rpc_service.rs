@@ -277,7 +277,7 @@ impl AdminRpc for AdminRpcImpl {
                         .unwrap_or(5),
                 ));
                 warn!("validator exit timeout");
-                std::process::exit(0);
+                // std::process::exit(0);
             })
             .unwrap();
         Ok(())
