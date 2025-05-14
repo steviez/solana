@@ -152,6 +152,7 @@ pub trait AdminRpc {
     type Metadata;
 
     #[rpc(meta, name = "exit")]
+    /// Initiates validator exit and returns the PID
     fn exit(&self, meta: Self::Metadata) -> Result<u32>;
 
     #[rpc(meta, name = "reloadPlugin")]
@@ -1492,9 +1493,13 @@ mod tests {
             expected_validator_id.pubkey().to_string()
         );
 
-        let contact_info_request =
-            r#"{"jsonrpc":"2.0","id":1,"method":"exit","params":[]}"#.to_string();
-        let exit_response = test_validator.handle_request(&contact_info_request);
+        let expected_parsed_response: Value = serde_json::from_str(&format!(
+            r#"{{"id": 1, "jsonrpc": "2.0", "result": {} }}"#,
+            std::process::id()
+        ))
+        .unwrap();
+        let exit_request = r#"{"jsonrpc":"2.0","id":1,"method":"exit","params":[]}"#.to_string();
+        let exit_response = test_validator.handle_request(&exit_request);
         let actual_parsed_response: Value =
             serde_json::from_str(&exit_response.expect("actual response"))
                 .expect("actual response deserialization");
