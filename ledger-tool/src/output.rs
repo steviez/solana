@@ -769,10 +769,8 @@ pub enum AccountsOutputMode {
 
 pub struct AccountsOutputConfig {
     pub mode: AccountsOutputMode,
+    pub output_config: Option<CliAccountNewConfig>,
     pub include_sysvars: bool,
-    pub include_account_contents: bool,
-    pub include_account_data: bool,
-    pub account_data_encoding: UiAccountEncoding,
 }
 
 impl AccountsOutputStreamer {
@@ -841,24 +839,16 @@ impl AccountsScanner {
         seq_serializer: &mut Option<S>,
         pubkey: &Pubkey,
         account: &AccountSharedData,
-        slot: Option<Slot>,
-        cli_account_new_config: &CliAccountNewConfig,
     ) where
         S: SerializeSeq,
     {
-        if self.config.include_account_contents {
+        if let Some(output_config) = &self.config.output_config {
+            let cli_account = CliAccount::new_with_config(pubkey, account, output_config);
+
             if let Some(serializer) = seq_serializer {
-                let cli_account =
-                    CliAccount::new_with_config(pubkey, account, cli_account_new_config);
                 serializer.serialize_element(&cli_account).unwrap();
             } else {
-                output_account(
-                    pubkey,
-                    account,
-                    slot,
-                    self.config.include_account_data,
-                    self.config.account_data_encoding,
-                );
+                println!("{}", &cli_account);
             }
         }
     }
@@ -870,23 +860,12 @@ impl AccountsScanner {
         let mut total_accounts_stats = self.total_accounts_stats.borrow_mut();
         let rent_collector = self.bank.rent_collector();
 
-        let cli_account_new_config = CliAccountNewConfig {
-            data_encoding: self.config.account_data_encoding,
-            ..CliAccountNewConfig::default()
-        };
-
         let scan_func = |account_tuple: Option<(&Pubkey, AccountSharedData, Slot)>| {
-            if let Some((pubkey, account, slot)) =
+            if let Some((pubkey, account, _slot)) =
                 account_tuple.filter(|(_, account, _)| self.should_process_account(account))
             {
                 total_accounts_stats.accumulate_account(pubkey, &account, rent_collector);
-                self.maybe_output_account(
-                    seq_serializer,
-                    pubkey,
-                    &account,
-                    Some(slot),
-                    &cli_account_new_config,
-                );
+                self.maybe_output_account(seq_serializer, pubkey, &account);
             }
         };
 
@@ -895,19 +874,13 @@ impl AccountsScanner {
                 self.bank.scan_all_accounts(scan_func, true).unwrap();
             }
             AccountsOutputMode::Individual(pubkeys) => pubkeys.iter().for_each(|pubkey| {
-                if let Some((account, slot)) = self
+                if let Some((account, _slot)) = self
                     .bank
                     .get_account_modified_slot_with_fixed_root(pubkey)
                     .filter(|(account, _)| self.should_process_account(account))
                 {
                     total_accounts_stats.accumulate_account(pubkey, &account, rent_collector);
-                    self.maybe_output_account(
-                        seq_serializer,
-                        pubkey,
-                        &account,
-                        Some(slot),
-                        &cli_account_new_config,
-                    );
+                    self.maybe_output_account(seq_serializer, pubkey, &account);
                 }
             }),
             AccountsOutputMode::Program(program_pubkey) => self
@@ -918,13 +891,7 @@ impl AccountsScanner {
                 .filter(|(_, account)| self.should_process_account(account))
                 .for_each(|(pubkey, account)| {
                     total_accounts_stats.accumulate_account(pubkey, account, rent_collector);
-                    self.maybe_output_account(
-                        seq_serializer,
-                        pubkey,
-                        account,
-                        None,
-                        &cli_account_new_config,
-                    );
+                    self.maybe_output_account(seq_serializer, pubkey, account);
                 }),
         }
     }
