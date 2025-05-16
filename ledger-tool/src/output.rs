@@ -848,6 +848,16 @@ impl AccountsScanner {
                 serializer.serialize_element(&cli_account).unwrap();
             } else {
                 println!("{}", &cli_account);
+                // CliAccount doesn't print the account data payload so handle
+                // that separately. If --no-account-data was specified,
+                // output_config.data_slice_config will have been created to
+                // yield an empty slice which will make data.empty() below true
+                let account_data = cli_account.keyed_account.account.data.decode();
+                if let Some(data) = account_data {
+                    if !data.is_empty() {
+                        println!("{:?}", data.hex_dump());
+                    }
+                }
             }
         }
     }
