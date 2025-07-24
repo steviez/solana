@@ -9,4 +9,5 @@ declare dcou_tainted_packages=(
   solana-banking-bench
   solana-bench-tps
   solana-dos
+  solana-local-cluster
 )
