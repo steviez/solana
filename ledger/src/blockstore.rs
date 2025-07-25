@@ -483,6 +483,7 @@ impl Blockstore {
         })
     }
 
+    #[cfg(feature = "dev-context-only-utils")]
     pub fn add_tree(
         &self,
         forks: Tree<Slot>,
@@ -5084,6 +5085,7 @@ pub fn create_new_ledger_from_name_auto_delete(
     (ledger_path, blockhash)
 }
 
+#[cfg(feature = "dev-context-only-utils")]
 pub fn entries_to_test_shreds(
     entries: &[Entry],
     slot: Slot,
@@ -5108,7 +5110,7 @@ pub fn entries_to_test_shreds(
         .collect()
 }
 
-// used for tests only
+#[cfg(feature = "dev-context-only-utils")]
 pub fn make_slot_entries(
     slot: Slot,
     parent_slot: Slot,
@@ -5119,7 +5121,7 @@ pub fn make_slot_entries(
     (shreds, entries)
 }
 
-// used for tests only
+#[cfg(feature = "dev-context-only-utils")]
 pub fn make_many_slot_entries(
     start_slot: Slot,
     num_slots: u64,
