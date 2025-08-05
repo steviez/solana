@@ -177,14 +177,17 @@ fn check_rpc_genesis_hash(
 }
 
 fn features_to_deactivate_for_cluster(
-    cluster_type: &ClusterType,
+    _cluster_type: &ClusterType,
     matches: &ArgMatches<'_>,
 ) -> Result<Vec<Pubkey>, Box<dyn error::Error>> {
     let mut features_to_deactivate = pubkeys_of(matches, "deactivate_feature").unwrap_or_default();
+    // Allow cluster_type::Development to match feature activation status from MainnetBeta
+    let cluster_type = ClusterType::MainnetBeta;
+    /*
     if cluster_type == &ClusterType::Development {
         return Ok(features_to_deactivate);
     }
-
+    */
     // if we're here, the cluster type must be one of "mainnet-beta", "testnet", or "devnet"
     assert!(matches!(
         cluster_type,
@@ -193,10 +196,10 @@ fn features_to_deactivate_for_cluster(
     let json_rpc_url = normalize_to_url_if_moniker(
         matches
             .value_of("json_rpc_url")
-            .unwrap_or(matches.value_of("cluster_type").unwrap()),
+            .unwrap_or("mainnet-beta"),
     );
     let rpc_client = RpcClient::new_with_commitment(json_rpc_url, CommitmentConfig::confirmed());
-    check_rpc_genesis_hash(cluster_type, &rpc_client)?;
+    check_rpc_genesis_hash(&cluster_type, &rpc_client)?;
     for feature_ids in FEATURE_NAMES
         .keys()
         .cloned()
