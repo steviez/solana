@@ -8,6 +8,15 @@ submit a PR patching this document and let's discuss! Once the PR is accepted,
 *all* code should be updated as soon as possible to reflect the new
 conventions.
 
+## First Time Contributors
+
+First time contributors should read through this guide in its entirety before
+opening a pull request. Additionally, pull requests from external (and
+especially first time) contributors that make inconsequential changes may be
+closed without merging at the discretion of Agave maintainers. Pull requests
+will be deemed consequential or not on a case by case basis. As an example,
+spelling and/or grammar fixes will almost always be considered inconsequential.
+
 ## Pull Requests
 
 Small, frequent PRs are much preferred to large, infrequent ones. A large PR is
