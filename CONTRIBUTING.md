@@ -15,7 +15,8 @@ opening a pull request. Additionally, pull requests from external (and
 especially first time) contributors that make inconsequential changes may be
 closed without merging at the discretion of Agave maintainers. Pull requests
 will be deemed consequential or not on a case by case basis. As an example,
-spelling and/or grammar fixes will almost always be considered inconsequential.
+spelling and/or grammar fixes will almost always be considered inconsequential,
+unless they materially correct the message.
 
 ## Pull Requests
 
