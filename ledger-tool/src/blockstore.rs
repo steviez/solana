@@ -681,6 +681,7 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
                 if slot > ending_slot {
                     break;
                 }
+
                 // Clear any shreds from last iteration
                 packet_batch.clear();
 
@@ -702,6 +703,7 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
                     .map(|packet| (packet.data(..).unwrap(), packet.meta().socket_addr()));
 
                 solana_streamer::sendmmsg::batch_send(&socket, data_and_addrs).unwrap();
+                info!("Sent {} shreds for slot {slot}", packet_batch.len());
             }
         }
         ("dead-slots", Some(arg_matches)) => {
