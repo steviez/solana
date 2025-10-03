@@ -674,19 +674,20 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
 
             let destination_addr =
                 value_t_or_exit!(arg_matches, "destination_addr", std::net::SocketAddr);
-            let socket = solana_net_utils::bind_to_unspecified().unwrap();
+            let socket_config = solana_net_utils::sockets::SocketConfiguration::default()
+                .send_buffer_size(256 * 1024 * 1024 * 1024);
+            let ip_addr = std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED);
+            let socket = solana_net_utils::sockets::bind_to_with_config(ip_addr, 0, socket_config).unwrap();
 
-            let mut packet_batch = solana_streamer::packet::PinnedPacketBatch::with_capacity(1024);
             for (slot, _meta) in source.slot_meta_iterator(starting_slot)? {
                 if slot > ending_slot {
                     break;
                 }
 
-                // Clear any shreds from last iteration
-                packet_batch.clear();
-
                 let data_shreds = source.slot_data_iterator(slot, 0)?;
 
+                let mut packet_batch =
+                    solana_streamer::packet::PinnedPacketBatch::with_capacity(1024);
                 for (_, shred_bytes) in data_shreds {
                     let length = shred_bytes.len();
 
