@@ -62,6 +62,7 @@ solana-loader-v3-interface = { workspace = true }
 solana-logger = "=3.0.0"
 solana-measure = { workspace = true }
 solana-message = { workspace = true }
+solana-net-utils = { workspace = true }
 solana-native-token = { workspace = true }
 solana-program-runtime = { workspace = true, features = ["metrics"] }
 solana-pubkey = { workspace = true }

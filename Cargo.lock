@@ -248,6 +248,7 @@ dependencies = [
  "solana-measure",
  "solana-message",
  "solana-native-token",
+ "solana-net-utils",
  "solana-program-runtime",
  "solana-pubkey",
  "solana-rent",

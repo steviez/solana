@@ -332,6 +332,14 @@ pub fn blockstore_subcommands<'a, 'b>(hidden: bool) -> Vec<App<'a, 'b>> {
                     .value_name("DIR")
                     .takes_value(true)
                     .help("Target ledger directory to write inner \"rocksdb\" within."),
+            )
+            .arg(
+                Arg::with_name("destination_addr")
+                    .long("destination-addr")
+                    .value_name("ADDR")
+                    .takes_value(true)
+                    .required(true)
+                    .help("Destination address to send shreds to"),
             ),
         SubCommand::with_name("dead-slots")
             .about("Print all the dead slots in the ledger")
@@ -662,25 +670,38 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
         ("copy", Some(arg_matches)) => {
             let starting_slot = value_t_or_exit!(arg_matches, "starting_slot", Slot);
             let ending_slot = value_t_or_exit!(arg_matches, "ending_slot", Slot);
-            let target_ledger =
-                PathBuf::from(value_t_or_exit!(arg_matches, "target_ledger", String));
-
             let source = crate::open_blockstore(&ledger_path, arg_matches, AccessType::Secondary);
-            let target = crate::open_blockstore(
-                &target_ledger,
-                arg_matches,
-                AccessType::PrimaryForMaintenance,
-            );
 
+            let destination_addr =
+                value_t_or_exit!(arg_matches, "destination_addr", std::net::SocketAddr);
+            let socket = solana_net_utils::bind_to_unspecified().unwrap();
+
+            let mut packet_batch = solana_streamer::packet::PinnedPacketBatch::with_capacity(1024);
             for (slot, _meta) in source.slot_meta_iterator(starting_slot)? {
                 if slot > ending_slot {
                     break;
                 }
-                let shreds = source.get_data_shreds_for_slot(slot, 0)?;
-                let shreds = shreds.into_iter().map(Cow::Owned);
-                if target.insert_cow_shreds(shreds, None, true).is_err() {
-                    warn!("error inserting shreds for slot {slot}");
+                // Clear any shreds from last iteration
+                packet_batch.clear();
+
+                let data_shreds = source.slot_data_iterator(slot, 0)?;
+
+                for (_, shred_bytes) in data_shreds {
+                    let length = shred_bytes.len();
+
+                    let mut packet = solana_streamer::packet::Packet::default();
+                    packet.buffer_mut()[..length].copy_from_slice(&shred_bytes);
+                    packet.meta_mut().size = length;
+                    packet.meta_mut().set_socket_addr(&destination_addr);
+
+                    packet_batch.push(packet);
                 }
+
+                let data_and_addrs = packet_batch
+                    .iter()
+                    .map(|packet| (packet.data(..).unwrap(), packet.meta().socket_addr()));
+
+                solana_streamer::sendmmsg::batch_send(&socket, data_and_addrs).unwrap();
             }
         }
         ("dead-slots", Some(arg_matches)) => {
