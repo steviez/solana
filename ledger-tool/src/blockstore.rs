@@ -685,10 +685,11 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
                 }
 
                 let data_shreds = source.slot_data_iterator(slot, 0)?;
+                let coding_shreds = source.slot_coding_iterator(slot, 0)?;
 
                 let mut packet_batch =
                     solana_streamer::packet::PinnedPacketBatch::with_capacity(1024);
-                for (_, shred_bytes) in data_shreds {
+                for (_, shred_bytes) in data_shreds.chain(coding_shreds) {
                     let length = shred_bytes.len();
 
                     let mut packet = solana_streamer::packet::Packet::default();
