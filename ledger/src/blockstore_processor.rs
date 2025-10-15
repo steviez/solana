@@ -831,7 +831,7 @@ pub type ProcessSlotCallback = Arc<dyn Fn(&Bank) + Sync + Send>;
 
 #[derive(Default, Clone)]
 pub struct ProcessOptions {
-    /// Run PoH, transaction signature and other transaction verifications on the entries.
+    /// Run PoH, transaction signature and other transaction verification on the entries.
     pub run_verification: bool,
     pub full_leader_cache: bool,
     pub halt_at_slot: Option<Slot>,
