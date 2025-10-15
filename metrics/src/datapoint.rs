@@ -9,7 +9,7 @@
 //! - datapoint_info!
 //! - datapoint_debug!
 //!
-//! The matric macro consists of the following three main parts:
+//! The metric macro consists of the following three main parts:
 //!  - name: the name of the metric.
 //!
 //!  - tags (optional): when a metric sample is reported with tags, you can use
