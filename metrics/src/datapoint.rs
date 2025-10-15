@@ -20,7 +20,7 @@
 //!
 //!  - fields (optional): fields are the main content of a metric sample. The
 //!    macro supports four different types of fields: bool, i64, f64, and String.
-//!    Here're their syntax:
+//!    Here is their syntax:
 //!
 //!    - ("field-name", "field-value", bool)
 //!    - ("field-name", "field-value", i64)
