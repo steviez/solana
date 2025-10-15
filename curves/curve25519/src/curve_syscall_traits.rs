@@ -31,7 +31,7 @@ pub trait GroupOperations {
 
     /// Subtracts two curve points: P_0 - P_1.
     ///
-    /// NOTE: Altneratively, one can consider replacing this with a `negate` function that maps a
+    /// NOTE: Alternatively, one can consider replacing this with a `negate` function that maps a
     /// curve point P -> -P. Then subtraction can be computed by combining `negate` and `add`
     /// syscalls. However, `subtract` is a much more widely used function than `negate`.
     fn subtract(left_point: &Self::Point, right_point: &Self::Point) -> Option<Self::Point>;
