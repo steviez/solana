@@ -44,7 +44,7 @@ pub trait MultiScalarMultiplication {
     type Scalar;
     type Point;
 
-    /// Given a vector of scalsrs S_1, ..., S_N, and curve points P_1, ..., P_N, computes the
+    /// Given a vector of scalars S_1, ..., S_N, and curve points P_1, ..., P_N, computes the
     /// "inner product": S_1*P_1 + ... + S_N*P_N.
     ///
     /// NOTE: This operation can be represented by combining `add` and `multiply` functions in
