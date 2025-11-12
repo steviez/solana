@@ -137,7 +137,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "signal-hook",
  "solana-account",
  "solana-account-decoder",
  "solana-accounts-db",

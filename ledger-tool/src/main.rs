@@ -849,16 +849,6 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 #[allow(clippy::cognitive_complexity)]
 fn main() {
-    // Ignore SIGUSR1 to prevent long-running calls being killed by logrotate
-    // in warehouse deployments
-    #[cfg(unix)]
-    {
-        // `register()` is unsafe because the action is called in a signal handler
-        // with the usual caveats. So long as this action body stays empty, we'll
-        // be fine
-        unsafe { signal_hook::low_level::register(signal_hook::consts::SIGUSR1, || {}) }.unwrap();
-    }
-
     agave_logger::setup_with_default_filter();
 
     let load_genesis_config_arg = load_genesis_arg();
