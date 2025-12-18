@@ -393,7 +393,6 @@ pub struct ValidatorConfig {
     pub accounts_db_force_initial_clean: bool,
     pub staked_nodes_overrides: Arc<RwLock<HashMap<Pubkey, u64>>>,
     pub validator_exit: Arc<RwLock<Exit>>,
-    pub validator_exit_backpressure: HashMap<String, Arc<AtomicBool>>,
     pub no_wait_for_vote_to_start_leader: bool,
     pub wait_to_vote_slot: Option<Slot>,
     pub runtime_config: RuntimeConfig,
@@ -472,7 +471,6 @@ impl ValidatorConfig {
             accounts_db_force_initial_clean: false,
             staked_nodes_overrides: Arc::new(RwLock::new(HashMap::new())),
             validator_exit: Arc::new(RwLock::new(Exit::default())),
-            validator_exit_backpressure: HashMap::default(),
             no_wait_for_vote_to_start_leader: true,
             accounts_db_config: ACCOUNTS_DB_CONFIG_FOR_TESTING,
             wait_to_vote_slot: None,
@@ -655,6 +653,8 @@ pub struct Validator {
     logfile: Option<PathBuf>,
     /// A global flag to indicate communicate shutdown between threads
     exit: Arc<AtomicBool>,
+    /// TODO
+    exit_backpressure: HashMap<String, Arc<AtomicBool>>,
     validator_exit: Arc<RwLock<Exit>>,
     json_rpc_service: Option<JsonRpcService>,
     pubsub_service: Option<PubSubService>,
@@ -986,12 +986,16 @@ impl Validator {
         ));
 
         let pending_snapshot_packages = Arc::new(Mutex::new(PendingSnapshotPackages::default()));
+        let exit_backpressure: HashMap<_, _> = [(
+            SnapshotPackagerService::NAME.to_string(),
+            Arc::new(AtomicBool::new(false)),
+        )]
+        .into();
         let snapshot_packager_service = if snapshot_controller
             .snapshot_config()
             .should_generate_snapshots()
         {
-            let exit_backpressure = config
-                .validator_exit_backpressure
+            let exit_backpressure_flag = exit_backpressure
                 .get(SnapshotPackagerService::NAME)
                 .cloned();
             let enable_gossip_push = true;
@@ -999,7 +1003,7 @@ impl Validator {
                 pending_snapshot_packages.clone(),
                 starting_snapshot_hashes,
                 exit.clone(),
-                exit_backpressure,
+                exit_backpressure_flag,
                 cluster_info.clone(),
                 snapshot_controller.clone(),
                 enable_gossip_push,
@@ -1791,6 +1795,7 @@ impl Validator {
         Ok(Self {
             logfile: config.logfile.clone(),
             exit,
+            exit_backpressure,
             stats_reporter_service,
             gossip_service,
             serve_repair_service,
@@ -1840,11 +1845,30 @@ impl Validator {
                 signal_hook::flag::register(libc::SIGUSR1, sigusr1_flag.clone())?;
             }
         }
+        // Teardown the validator when SIGTERM signal is received
+        let sigterm_flag = Arc::new(AtomicBool::new(false));
+        #[cfg(unix)]
+        {
+            signal_hook::flag::register(libc::SIGTERM, sigterm_flag.clone())?;
+        }
 
         info!("Validator::listen_for_signals() has started");
         loop {
             if self.exit.load(Ordering::Relaxed) {
                 break;
+            }
+
+            if sigterm_flag.load(Ordering::Relaxed) {
+                #[cfg(unix)]
+                {
+                    info!("Received SIGTERM, stopping the validator");
+                    self.exit.store(true, Ordering::Relaxed);
+                    break;
+                }
+                #[cfg(not(unix))]
+                {
+                    unreachable!("The SIGTERM signal is only handled on unix systems");
+                }
             }
 
             if sigusr1_flag.load(Ordering::Relaxed) {
@@ -1874,15 +1898,86 @@ impl Validator {
         Ok(())
     }
 
-    // Used for notifying many nodes in parallel to exit
+/*
+        thread::Builder::new()
+            .name("solProcessExit".into())
+            .spawn(move || {
+                // Delay exit signal until this RPC request completes, otherwise the caller of `exit` might
+                // receive a confusing error as the validator shuts down before a response is sent back.
+                thread::sleep(Duration::from_millis(100));
+
+                // TODO: Debug why Exit doesn't always cause the validator to fully exit
+                // (rocksdb background processing or some other stuck thread perhaps?).
+                //
+                // If the process is still alive after five seconds, exit harder
+                thread::sleep(Duration::from_secs(
+                    env::var("SOLANA_VALIDATOR_EXIT_TIMEOUT")
+                        .ok()
+                        .and_then(|x| x.parse().ok())
+                        .unwrap_or(5),
+                ));
+                warn!("validator exit timeout");
+                std::process::exit(0);
+            })
+            .unwrap();
+
+
+                // TODO: Debug why Exit doesn't always cause the validator to fully exit
+                // (rocksdb background processing or some other stuck thread perhaps?).
+                //
+                // If the process is still alive after five seconds, exit harder
+                thread::sleep(Duration::from_secs(
+                    env::var("SOLANA_VALIDATOR_EXIT_TIMEOUT")
+                        .ok()
+                        .and_then(|x| x.parse().ok())
+                        .unwrap_or(5),
+                ));
+                warn!("validator exit timeout");
+                std::process::exit(0);
+            })
+            .unwrap();
+
+        Ok(())
+    }
+*/
+
+    /// TODO
+    // used by:
+    // - local-cluster unit tests
+    // - Validator::close()
+    // - Unit test in this filfe
     pub fn exit(&mut self) {
         self.validator_exit.write().unwrap().exit();
+
+        if !self.exit_backpressure.is_empty() {
+            let service_names = self.exit_backpressure.keys();
+            info!("Wait for these services to complete: {service_names:?}");
+            loop {
+                // The initial sleep is a grace period to allow the services to raise their
+                // backpressure flags.
+                // Subsequent sleeps are to throttle how often we check and log.
+                thread::sleep(Duration::from_secs(1));
+
+                let mut any_flags_raised = false;
+                for (name, flag) in self.exit_backpressure.iter() {
+                    let is_flag_raised = flag.load(Ordering::Relaxed);
+                    if is_flag_raised {
+                        info!("{name}'s exit backpressure flag is raised");
+                        any_flags_raised = true;
+                    }
+                }
+                if !any_flags_raised {
+                    break;
+                }
+            }
+            info!("All services have completed");
+        }
 
         // drop all signals in blockstore
         self.blockstore.drop_signal();
     }
 
-    pub fn close(mut self) {
+    fn close(mut self) {
         self.exit();
         self.join();
     }

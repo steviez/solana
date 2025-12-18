@@ -33,7 +33,6 @@ use {
         banking_trace::DISABLED_BAKING_TRACE_DIR,
         consensus::tower_storage,
         repair::repair_handler::RepairHandlerType,
-        snapshot_packager_service::SnapshotPackagerService,
         system_monitor_service::SystemMonitorService,
         tpu::MAX_VOTES_PER_SECOND,
         validator::{
@@ -617,11 +616,6 @@ pub fn execute(
         enable_scheduler_bindings: matches.is_present("enable_scheduler_bindings"),
         banking_trace_dir_byte_limit: parse_banking_trace_dir_byte_limit(matches),
         validator_exit: Arc::new(RwLock::new(Exit::default())),
-        validator_exit_backpressure: [(
-            SnapshotPackagerService::NAME.to_string(),
-            Arc::new(AtomicBool::new(false)),
-        )]
-        .into(),
     };
 
     let reserved = validator_config
@@ -718,7 +712,6 @@ pub fn execute(
             rpc_addr: validator_config.rpc_addrs.map(|(rpc_addr, _)| rpc_addr),
             start_time: std::time::SystemTime::now(),
             validator_exit: validator_config.validator_exit.clone(),
-            validator_exit_backpressure: validator_config.validator_exit_backpressure.clone(),
             start_progress: start_progress.clone(),
             authorized_voter_keypairs: authorized_voter_keypairs.clone(),
             post_init: admin_service_post_init.clone(),
@@ -1039,8 +1032,9 @@ pub fn execute(
     if let Some(filename) = init_complete_file {
         File::create(filename).map_err(|err| format!("unable to create {filename}: {err}"))?;
     }
-    info!("Validator initialized");
+    info!("Validator has started");
     validator.listen_for_signals()?;
+    // TODO: validator.exit();
     validator.join();
     info!("Validator exiting..");
 
