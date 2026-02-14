@@ -444,6 +444,7 @@ mod tests {
             packet::{to_packet_batches, Packet, RecycledPacketBatch},
             test_tx::test_tx,
         },
+        std::sync::Arc,
     };
 
     fn count_non_discard(packet_batches: &[PacketBatch]) -> usize {
@@ -501,9 +502,16 @@ mod tests {
     fn test_sigverify_stage(use_same_tx: bool) {
         agave_logger::setup();
         trace!("start");
+        let threadpool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(4)
+                .thread_name(|i| format!("solSigVerTest{i:02}"))
+                .build()
+                .unwrap(),
+        );
         let (packet_s, packet_r) = unbounded();
         let (verified_s, verified_r) = BankingTracer::channel_for_test();
-        let verifier = TransactionSigVerifier::new(verified_s, None);
+        let verifier = TransactionSigVerifier::new(threadpool, verified_s, None);
         let stage = SigVerifyStage::new(packet_r, verifier, "solSigVerTest", "test");
 
         let now = Instant::now();
