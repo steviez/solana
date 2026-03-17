@@ -35,6 +35,13 @@ pub const DEFAULT_MAX_LEDGER_SHREDS: u64 = 200_000_000;
 // Allow down to 50m, or 3.5 days at idle, 1hr at 50k load, around ~100GB
 pub const DEFAULT_MIN_MAX_LEDGER_SHREDS: u64 = 50_000_000;
 
+// Flush the write-ahead-log (WAL) on this fixed interval. Performing WAL flush
+// here (along with disabling auto WAL flush) allow threads writing the
+// Blockstore to avoid the cost of flushing the WAL
+//
+// The interval is set to 1 second to avoid iss
+const WAL_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
+
 // Perform blockstore cleanup at this interval to limit the overhead of cleanup
 // Cleanup will be considered after the latest root has advanced by this value
 const DEFAULT_CLEANUP_SLOT_INTERVAL: u64 = 512;
@@ -59,6 +66,7 @@ impl BlockstoreCleanupService {
     ) -> Self {
         let mut last_purge_slot = 0;
         let mut last_check_time = Instant::now();
+        let mut last_wal_flush_time = Instant::now();
 
         let t_cleanup = Builder::new()
             .name("solBstoreClean".to_string())
@@ -76,6 +84,12 @@ impl BlockstoreCleanupService {
                     if exit.load(Ordering::Relaxed) {
                         break;
                     }
+
+                    if last_wal_flush_time.elapsed() > WAL_FLUSH_INTERVAL {
+                        blockstore.flush_wal().expect("update me");
+                        last_wal_flush_time = Instant::now();
+                    }
+
                     if last_check_time.elapsed() > LOOP_LIMITER {
                         Self::cleanup_ledger(
                             &blockstore,

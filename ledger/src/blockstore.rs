@@ -4774,6 +4774,11 @@ impl Blockstore {
     pub fn write_batch(&self, write_batch: WriteBatch) -> Result<()> {
         self.db.write(write_batch)
     }
+
+    // Flush the write-ahead-log (WAL) in the underlying rocksdb database
+    pub(crate) fn flush_wal(&self) -> Result<()> {
+        self.db.flush_wal()
+    }
 }
 
 // Updates the `completed_data_indexes` with a new shred `new_shred_index`.

@@ -397,6 +397,12 @@ impl Rocks {
         Ok(self.db.raw_iterator_cf(cf))
     }
 
+    pub(crate) fn flush_wal(&self) -> Result<()> {
+        // Disable syncing data to disk for performance reasons
+        const ENABLE_SYNC: bool = false;
+        Ok(self.db.flush_wal(ENABLE_SYNC)?)
+    }
+
     pub(crate) fn batch(&self) -> Result<WriteBatch> {
         Ok(WriteBatch {
             write_batch: RWriteBatch::default(),
@@ -1160,8 +1166,17 @@ fn get_db_options(blockstore_options: &BlockstoreOptions) -> Options {
         options
             .set_max_background_flushes(blockstore_options.num_rocksdb_flush_threads.get() as i32);
     }
+
     // Set max total wal size to 4G.
     options.set_max_total_wal_size(4 * 1024 * 1024 * 1024);
+    // Disable automatic write ahead log (WAL) flush. With this setting, threads
+    // writing to rocksdb will avoid the cost of page cache flushes. The WAL
+    // must still be flushed to avoid data loss in the event of an irregular
+    // process shutdown. Flushing the WAL will instead be done by a background
+    // Blockstore thread.
+    if blockstore_options.access_type == AccessType::Primary {
+        options.set_manual_wal_flush(true);
+    }
 
     if should_disable_auto_compactions(&blockstore_options.access_type) {
         options.set_disable_auto_compactions(true);
