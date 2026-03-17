@@ -52,7 +52,11 @@ pub struct BlockstoreCleanupService {
 }
 
 impl BlockstoreCleanupService {
-    pub fn new(blockstore: Arc<Blockstore>, max_ledger_shreds: u64, exit: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        blockstore: Arc<Blockstore>,
+        max_ledger_shreds: Option<u64>,
+        exit: Arc<AtomicBool>,
+    ) -> Self {
         let mut last_purge_slot = 0;
         let mut last_check_time = Instant::now();
 
@@ -60,9 +64,14 @@ impl BlockstoreCleanupService {
             .name("solBstoreClean".to_string())
             .spawn(move || {
                 info!(
-                    "BlockstoreCleanupService has started with max ledger \
-                     shreds={max_ledger_shreds}",
+                    "BlockstoreCleanupService has started with {}",
+                    if let Some(max_shreds) = max_ledger_shreds {
+                        format!("max shred limit {max_shreds}")
+                    } else {
+                        "no shred limit, automatic cleanup is disabled".to_string()
+                    }
                 );
+
                 loop {
                     if exit.load(Ordering::Relaxed) {
                         break;
@@ -81,6 +90,7 @@ impl BlockstoreCleanupService {
                     // thread can respond to the exit flag in a timely manner
                     thread::sleep(Duration::from_secs(1));
                 }
+
                 info!("BlockstoreCleanupService has stopped");
             })
             .unwrap();
@@ -195,10 +205,15 @@ impl BlockstoreCleanupService {
     /// Also see `blockstore::purge_slot`.
     pub fn cleanup_ledger(
         blockstore: &Arc<Blockstore>,
-        max_ledger_shreds: u64,
+        max_ledger_shreds: Option<u64>,
         last_purge_slot: &mut u64,
         purge_interval: u64,
     ) {
+        let Some(max_ledger_shreds) = max_ledger_shreds else {
+            trace!("Skipping Blockstore cleanup since there is no max shred limit");
+            return;
+        };
+
         let root = blockstore.max_root();
         if root - *last_purge_slot <= purge_interval {
             return;
@@ -365,7 +380,7 @@ mod tests {
         // Mark 50 as a root to kill all but 5 shreds, which will be in the newest slots
         let mut last_purge_slot = 0;
         blockstore.set_roots([50].iter()).unwrap();
-        BlockstoreCleanupService::cleanup_ledger(&blockstore, 5, &mut last_purge_slot, 10);
+        BlockstoreCleanupService::cleanup_ledger(&blockstore, Some(5), &mut last_purge_slot, 10);
         assert_eq!(last_purge_slot, 50);
 
         //check that 0-40 don't exist
@@ -409,7 +424,7 @@ mod tests {
             blockstore.set_roots([slot + num_slots].iter()).unwrap();
             BlockstoreCleanupService::cleanup_ledger(
                 &blockstore,
-                initial_slots,
+                Some(initial_slots),
                 &mut last_purge_slot,
                 10,
             );
