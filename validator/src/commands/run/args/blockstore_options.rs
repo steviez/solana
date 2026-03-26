@@ -80,7 +80,7 @@ impl FromClapArgMatches for BlockstoreOptions {
             access_type: AccessType::Primary,
             // Having the WAL enabled allows us to make assumptions about
             // consistency between the Blockstore columns
-            disable_wal_for_shred_insertion: false,
+            disable_wal_for_shred_insertion: true,
             num_rocksdb_compaction_threads: rocksdb_compaction_threads,
             num_rocksdb_flush_threads: rocksdb_flush_threads,
         })

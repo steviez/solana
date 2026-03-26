@@ -776,6 +776,10 @@ where
         self.backend
             .delete_file_in_range_cf(self.handle(), from_key, to_key)
     }
+
+    pub fn flush(&self) -> Result<()> {
+        Ok(self.backend.db.flush_cf(self.handle())?)
+    }
 }
 
 impl<C> LedgerColumn<C>

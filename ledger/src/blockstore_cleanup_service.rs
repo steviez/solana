@@ -90,6 +90,12 @@ impl BlockstoreCleanupService {
                     // thread can respond to the exit flag in a timely manner
                     thread::sleep(Duration::from_secs(1));
                 }
+                // TODO: Avoid the .unwrap() by matching lock result
+                // Enable the WAL incase incase another thread is still writing
+                *blockstore.insert_shreds_lock.lock().unwrap() = false;
+                let _ = blockstore.flush_shred_insertion_columns().inspect_err(|err| {
+                    error!("Error while flushing blockstore columns: {err}");
+                });
 
                 info!("BlockstoreCleanupService has stopped");
             })

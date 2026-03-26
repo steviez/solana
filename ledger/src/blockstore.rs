@@ -282,8 +282,7 @@ pub struct Blockstore {
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
 
     max_root: AtomicU64,
-    insert_shreds_lock: Mutex<()>,
-    disable_wal_for_shred_insertion: bool,
+    pub(crate) insert_shreds_lock: Mutex</*disable_wal_for_shred_insertion:*/ bool>,
     new_shreds_signals: Mutex<Vec<Sender<bool>>>,
     completed_slots_senders: Mutex<Vec<CompletedSlotsSender>>,
     pub lowest_cleanup_slot: RwLock<Slot>,
@@ -471,8 +470,7 @@ impl Blockstore {
 
             new_shreds_signals: Mutex::default(),
             completed_slots_senders: Mutex::default(),
-            insert_shreds_lock: Mutex::<()>::default(),
-            disable_wal_for_shred_insertion,
+            insert_shreds_lock: Mutex::new(disable_wal_for_shred_insertion),
             max_root,
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             slots_stats: SlotsStats::default(),
@@ -1395,7 +1393,8 @@ impl Blockstore {
 
         // Acquire the insertion lock
         let mut start = Measure::start("Blockstore lock");
-        let _lock = self.insert_shreds_lock.lock().unwrap();
+        let lock = self.insert_shreds_lock.lock().unwrap();
+        let disable_wal_for_shred_insertion = *lock;
         start.stop();
         metrics.insert_lock_elapsed_us += start.as_us();
 
@@ -1437,7 +1436,7 @@ impl Blockstore {
         let mut start = Measure::start("Write Batch");
         self.write_batch_with_options(
             shred_insertion_tracker.write_batch,
-            self.disable_wal_for_shred_insertion,
+            disable_wal_for_shred_insertion,
         )?;
         start.stop();
         metrics.write_batch_elapsed_us += start.as_us();
@@ -1495,6 +1494,23 @@ impl Blockstore {
         }
 
         Ok(completed_data_set_infos)
+    }
+
+    pub(crate) fn flush_shred_insertion_columns(&self) -> Result<()> {
+        // Call each function before checking in order to complete as much work
+        // as possible should a failure arise
+        [
+            self.data_shred_cf.flush(),
+            self.code_shred_cf.flush(),
+            self.meta_cf.flush(),
+            self.index_cf.flush(),
+            self.erasure_meta_cf.flush(),
+            self.merkle_root_meta_cf.flush(),
+            self.orphans_cf.flush(),
+            self.dead_slots_cf.flush(),
+        ]
+        .into_iter()
+        .collect()
     }
 
     pub fn add_new_shred_signal(&self, s: Sender<bool>) {
