@@ -330,6 +330,12 @@ pub fn blockstore_subcommands<'a, 'b>(hidden: bool) -> Vec<App<'a, 'b>> {
                     .value_name("DIR")
                     .takes_value(true)
                     .help("Target ledger directory to write inner \"rocksdb\" within."),
+            )
+            .arg(
+                Arg::with_name("enable-wal-for-shred-insertion")
+                    .long("enable_wal_for_shred_insertion")
+                    .hidden(true)
+                    .help("Enable the write ahead log (WAL) for shred insertion"),
             ),
         SubCommand::with_name("dead-slots")
             .about("Print all the dead slots in the ledger")

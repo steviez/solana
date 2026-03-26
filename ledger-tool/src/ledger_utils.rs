@@ -479,6 +479,7 @@ pub fn open_blockstore(
     let wal_recovery_mode = matches
         .value_of("wal_recovery_mode")
         .map(BlockstoreRecoveryMode::from);
+    let disable_wal_for_shred_insertion = matches.is_present("enable_wal_for_shred_insertion");
     let force_update_to_open = matches.is_present("force_update_to_open");
 
     match Blockstore::open_with_options(
@@ -486,6 +487,7 @@ pub fn open_blockstore(
         BlockstoreOptions {
             access_type: access_type.clone(),
             recovery_mode: wal_recovery_mode.clone(),
+            disable_wal_for_shred_insertion,
             ..BlockstoreOptions::default()
         },
     ) {

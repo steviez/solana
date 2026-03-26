@@ -283,6 +283,7 @@ pub struct Blockstore {
 
     max_root: AtomicU64,
     insert_shreds_lock: Mutex<()>,
+    disable_wal_for_shred_insertion: bool,
     new_shreds_signals: Mutex<Vec<Sender<bool>>>,
     completed_slots_senders: Mutex<Vec<CompletedSlotsSender>>,
     pub lowest_cleanup_slot: RwLock<Slot>,
@@ -398,6 +399,7 @@ impl Blockstore {
         fs::create_dir_all(ledger_path)?;
         let blockstore_path = ledger_path.join(BLOCKSTORE_DIRECTORY_ROCKS_LEVEL);
 
+        let disable_wal_for_shred_insertion = options.disable_wal_for_shred_insertion;
         // Open the database
         let mut measure = Measure::start("blockstore open");
         info!("Opening blockstore at {blockstore_path:?}");
@@ -470,6 +472,7 @@ impl Blockstore {
             new_shreds_signals: Mutex::default(),
             completed_slots_senders: Mutex::default(),
             insert_shreds_lock: Mutex::<()>::default(),
+            disable_wal_for_shred_insertion,
             max_root,
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             slots_stats: SlotsStats::default(),
@@ -1432,7 +1435,10 @@ impl Blockstore {
 
         // Write out the accumulated batch.
         let mut start = Measure::start("Write Batch");
-        self.write_batch(shred_insertion_tracker.write_batch)?;
+        self.write_batch_with_options(
+            shred_insertion_tracker.write_batch,
+            self.disable_wal_for_shred_insertion,
+        )?;
         start.stop();
         metrics.write_batch_elapsed_us += start.as_us();
 
@@ -4906,7 +4912,14 @@ impl Blockstore {
     }
 
     pub fn write_batch(&self, write_batch: WriteBatch) -> Result<()> {
-        self.db.write(write_batch)
+        // Leave the WAL enabled for the general case as disabling the WAL
+        // requires extra care to avoid losing data and/or corrupting rocksdb
+        const DISABLE_WAL: bool = false;
+        self.db.write(write_batch, DISABLE_WAL)
+    }
+
+    fn write_batch_with_options(&self, write_batch: WriteBatch, disable_wal: bool) -> Result<()> {
+        self.db.write(write_batch, disable_wal)
     }
 
     #[cfg(feature = "dev-context-only-utils")]
@@ -7700,7 +7713,7 @@ pub mod tests {
         );
 
         // Block is now dead
-        blockstore.db.write(write_batch).unwrap();
+        blockstore.write_batch(write_batch).unwrap();
         assert!(blockstore.is_dead(slot));
         blockstore.remove_dead_slot(slot).unwrap();
 
@@ -7758,7 +7771,7 @@ pub mod tests {
             write_batch,
             ..
         } = shred_insertion_tracker;
-        blockstore.db.write(write_batch).unwrap();
+        blockstore.write_batch(write_batch).unwrap();
 
         // Verify that we still have the merkle root meta for the original shred
         // and the new shred
