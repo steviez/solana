@@ -1491,6 +1491,36 @@ impl Blockstore {
         Ok(completed_data_set_infos)
     }
 
+    #[cfg(feature = "dev-context-only-utils")]
+    pub fn flush_shred_insertion_columns(&self) -> Result<()> {
+        // Call each function before checking in order to complete as much work
+        // as possible should a failure arise
+        [
+            self.data_shred_cf.flush(),
+            self.code_shred_cf.flush(),
+            self.meta_cf.flush(),
+            self.index_cf.flush(),
+            self.erasure_meta_cf.flush(),
+            self.merkle_root_meta_cf.flush(),
+            self.orphans_cf.flush(),
+            self.dead_slots_cf.flush(),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    #[cfg(feature = "dev-context-only-utils")]
+    pub fn compact_shred_insertion_columns(&self) {
+        self.data_shred_cf.compact();
+        self.code_shred_cf.compact();
+        self.meta_cf.compact();
+        self.index_cf.compact();
+        self.erasure_meta_cf.compact();
+        self.merkle_root_meta_cf.compact();
+        self.orphans_cf.compact();
+        self.dead_slots_cf.compact();
+    }
+
     pub fn add_new_shred_signal(&self, s: Sender<bool>) {
         self.new_shreds_signals.lock().unwrap().push(s);
     }

@@ -655,10 +655,10 @@ where
         }))
     }
 
-    #[cfg(test)]
-    // The validator performs compactions asynchronously, this method is
-    // provided to force a synchronous compaction to test our compaction filter
-    pub fn compact(&self) {
+    /// Perform a synchronous compaction over the entire data range for this
+    /// column. A steady state validator performs compactions asynchonously and
+    /// automatically so this function is only necessary for special cases
+    pub(crate) fn compact(&self) {
         // compact_range_cf() optionally takes a start and end key to limit
         // compaction. Providing values will result in a different method
         // getting called in the rocksdb code, even if the specified keys span
@@ -667,8 +667,9 @@ where
         // Internally, rocksdb will do some checks to figure out if it should
         // run a compaction. Empirically, it has been found that passing the
         // keys leads to more variability in whether rocksdb runs a compaction
-        // or not. For the sake of our unit tests, we want the compaction to
-        // run everytime. So, set the keys as None which will result in rocksdb
+        // or not. This function is intended for special cases anyways and it is
+        // reasonable that the caller really wants a compaction to occur if they
+        // call this.  So, set the keys as None which will result in rocksdb
         // using the heavier method to determine if a compaction should run
         let (start, end) = (None::<&[u8]>, None::<&[u8]>);
         self.backend.db.compact_range_cf(self.handle(), start, end);
@@ -771,6 +772,10 @@ where
         let to_key = <C as Column>::key(&C::as_index(to));
         self.backend
             .delete_file_in_range_cf(self.handle(), from_key, to_key)
+    }
+
+    pub fn flush(&self) -> Result<()> {
+        Ok(self.backend.db.flush_cf(self.handle())?)
     }
 }
 

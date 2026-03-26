@@ -330,6 +330,11 @@ pub fn blockstore_subcommands<'a, 'b>(hidden: bool) -> Vec<App<'a, 'b>> {
                     .value_name("DIR")
                     .takes_value(true)
                     .help("Target ledger directory to write inner \"rocksdb\" within."),
+            )
+            .arg(
+                Arg::with_name("compact")
+                    .long("compact")
+                    .help("Compact the target Blockstore after shred insertion has completed"),
             ),
         SubCommand::with_name("dead-slots")
             .about("Print all the dead slots in the ledger")
@@ -639,6 +644,7 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
             let ending_slot = value_t_or_exit!(arg_matches, "ending_slot", Slot);
             let target_ledger =
                 PathBuf::from(value_t_or_exit!(arg_matches, "target_ledger", String));
+            let compact = arg_matches.is_present("compact");
 
             let source = crate::open_blockstore(&ledger_path, arg_matches, AccessType::ReadOnly);
             let target = crate::open_blockstore(
@@ -656,6 +662,12 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
                 if target.insert_cow_shreds(shreds, None, true).is_err() {
                     warn!("error inserting shreds for slot {slot}");
                 }
+            }
+
+            if compact {
+                // Flush the columns so all data is in SST's before compacting
+                target.flush_shred_insertion_columns()?;
+                target.compact_shred_insertion_columns();
             }
         }
         ("dead-slots", Some(arg_matches)) => {
