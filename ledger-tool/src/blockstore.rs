@@ -28,7 +28,6 @@ use {
         shred::Shred,
     },
     std::{
-        borrow::Cow,
         collections::{BTreeMap, BTreeSet, HashMap},
         fs::File,
         io::{BufRead, BufReader},
@@ -630,20 +629,16 @@ fn do_blockstore_process_command(ledger_path: &Path, matches: &ArgMatches<'_>) -
                 arg_matches,
                 AccessType::PrimaryForMaintenance,
             );
-            let mut pinnable_slice = target.new_pinnable_slice();
-            let mut write_batch = target.get_write_batch();
 
-            for (slot, _meta) in source.slot_meta_iterator(starting_slot)? {
-                if slot > ending_slot {
-                    break;
-                }
-                let shreds = source.get_data_shreds_for_slot(slot, 0)?;
-                let shreds = shreds.into_iter().map(Cow::Owned);
-                if target
-                    .insert_cow_shreds(shreds, true, &mut pinnable_slice, &mut write_batch)
-                    .is_err()
-                {
-                    warn!("error inserting shreds for slot {slot}");
+            for (slot, _meta) in source
+                .slot_meta_iterator(starting_slot)?
+                .take_while(|(slot, _meta)| *slot <= ending_slot)
+            {
+                match source.copy_slot(&target, slot) {
+                    Ok(()) => {}
+                    Err(err) => {
+                        warn!("Error copying slot {slot}: {err}");
+                    }
                 }
             }
         }
