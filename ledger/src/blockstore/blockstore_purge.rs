@@ -405,8 +405,10 @@ impl Blockstore {
         }
 
         for slot in from_slot..=to_slot {
-            let (slot_entries, _, _) =
-                self.get_slot_entries_with_shred_info(slot, 0, true /* allow_dead_slots */)?;
+            let (slot_entries, _, _) = self.get_slot_entries_with_shred_info(
+                slot, 0, true, /* allow_dead_slots */
+                /*large_readahead:*/ true,
+            )?;
             let transactions = slot_entries
                 .into_iter()
                 .flat_map(|entry| entry.transactions);

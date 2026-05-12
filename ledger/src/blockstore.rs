@@ -3786,10 +3786,13 @@ impl Blockstore {
             return Err(BlockstoreError::SlotUnavailable);
         }
 
+        // Fetching the full block so use large readhead
+        let large_readahead = true;
         let (slot_entries, _, _) = self.get_slot_entries_with_shred_info(
             slot,
             /*shred_start_index:*/ 0,
             allow_dead_slots,
+            large_readahead,
         )?;
 
         if slot_entries.is_empty() {
@@ -3838,6 +3841,7 @@ impl Blockstore {
                 parent_slot,
                 /*shred_start_index:*/ 0,
                 allow_dead_slots,
+                large_readahead,
             )
             .ok()
             .and_then(|(entries, _, is_full)| {
@@ -4469,7 +4473,9 @@ impl Blockstore {
 
     /// Returns the entry vector for the slot starting with `shred_start_index`
     pub fn get_slot_entries(&self, slot: Slot, shred_start_index: u64) -> Result<Vec<Entry>> {
-        self.get_slot_entries_with_shred_info(slot, shred_start_index, false)
+        // TODO: plumb
+        let large_readahead = false;
+        self.get_slot_entries_with_shred_info(slot, shred_start_index, false, large_readahead)
             .map(|x| x.0)
     }
 
@@ -4508,6 +4514,7 @@ impl Blockstore {
         slot: Slot,
         start_index: u64,
         allow_dead_slots: bool,
+        large_readahead: bool,
     ) -> Result<(Vec<Entry>, u64, bool)> {
         let Some((completed_ranges, slot_meta, num_shreds)) =
             self.get_slot_data_with_shred_info_common(slot, start_index, allow_dead_slots)?
@@ -4515,7 +4522,12 @@ impl Blockstore {
             return Ok((vec![], 0, false));
         };
 
-        let entries = self.get_slot_entries_in_block(slot, &completed_ranges, Some(&slot_meta))?;
+        let entries = self.get_slot_entries_in_block(
+            slot,
+            &completed_ranges,
+            Some(&slot_meta),
+            large_readahead,
+        )?;
         Ok((entries, num_shreds, slot_meta.is_full()))
     }
 
@@ -4657,6 +4669,7 @@ impl Blockstore {
         slot: Slot,
         completed_ranges: &CompletedRanges,
         slot_meta: Option<&SlotMeta>,
+        large_readahead: bool,
         mut deserialize: impl FnMut(Vec<u8>) -> Result<Vec<T>>,
     ) -> Result<Vec<T>> {
         debug_assert!(
@@ -4680,16 +4693,16 @@ impl Blockstore {
         let indices = u64::from(start)..u64::from(end);
         let keys = indices.clone().map(|index| (slot, index));
         let keys = self.data_shred_cf.multi_get_keys(keys);
-        let mut shreds =
-            self.data_shred_cf
-                .multi_get_bytes(&keys)
-                .zip(indices)
-                .map(|(shred, index)| {
-                    shred?.ok_or_else(|| {
-                        maybe_panic(index);
-                        BlockstoreError::MissingShred(slot, index)
-                    })
-                });
+        let mut shreds = self
+            .data_shred_cf
+            .multi_get_bytes(&keys, large_readahead)
+            .zip(indices)
+            .map(|(shred, index)| {
+                shred?.ok_or_else(|| {
+                    maybe_panic(index);
+                    BlockstoreError::MissingShred(slot, index)
+                })
+            });
         completed_ranges
             .iter()
             .map(|Range { start, end }| end - start)
@@ -4717,15 +4730,23 @@ impl Blockstore {
         completed_ranges: &CompletedRanges,
         slot_meta: Option<&SlotMeta>,
     ) -> Result<Vec<BlockComponent>> {
-        self.get_slot_data_in_block(slot, completed_ranges, slot_meta, |payload| {
-            wincode::deserialize(&payload)
-                .map(|component| vec![component])
-                .map_err(|e| {
-                    BlockstoreError::InvalidShredData(format!(
-                        "could not reconstruct block component: {e}"
-                    ))
-                })
-        })
+        // TODO: plumb later
+        let large_readahead = false;
+        self.get_slot_data_in_block(
+            slot,
+            completed_ranges,
+            slot_meta,
+            large_readahead,
+            |payload| {
+                wincode::deserialize(&payload)
+                    .map(|component| vec![component])
+                    .map_err(|e| {
+                        BlockstoreError::InvalidShredData(format!(
+                            "could not reconstruct block component: {e}"
+                        ))
+                    })
+            },
+        )
     }
 
     /// Fetch the entries corresponding to all of the shred indices in `completed_ranges`.
@@ -4734,12 +4755,19 @@ impl Blockstore {
         slot: Slot,
         completed_ranges: &CompletedRanges,
         slot_meta: Option<&SlotMeta>,
+        large_readahead: bool,
     ) -> Result<Vec<Entry>> {
-        self.get_slot_data_in_block(slot, completed_ranges, slot_meta, |payload| {
-            <WincodeVec<Entry, MaxDataShredsLen>>::deserialize(&payload).map_err(|e| {
-                BlockstoreError::InvalidShredData(format!("could not reconstruct entries: {e}"))
-            })
-        })
+        self.get_slot_data_in_block(
+            slot,
+            completed_ranges,
+            slot_meta,
+            large_readahead,
+            |payload| {
+                <WincodeVec<Entry, MaxDataShredsLen>>::deserialize(&payload).map_err(|e| {
+                    BlockstoreError::InvalidShredData(format!("could not reconstruct entries: {e}"))
+                })
+            },
+        )
     }
 
     pub fn get_entries_in_data_block(
@@ -4748,7 +4776,9 @@ impl Blockstore {
         range: Range<u32>,
         slot_meta: Option<&SlotMeta>,
     ) -> Result<Vec<Entry>> {
-        self.get_slot_entries_in_block(slot, &vec![range], slot_meta)
+        // TODO: plumb or maybe delete; CompletedDataSetsService is caller
+        let large_readahead = false;
+        self.get_slot_entries_in_block(slot, &vec![range], slot_meta, large_readahead)
     }
 
     /// Returns a mapping from each elements of `slots` to a list of the

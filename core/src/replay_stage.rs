@@ -2554,6 +2554,11 @@ impl ReplayStage {
         let mut w_replay_stats = replay_stats.write().unwrap();
         let mut w_replay_progress = replay_progress.write().unwrap();
         let tx_count_before = w_replay_progress.num_txs;
+
+        // Steady state is partial blocks getting streamed so skip the large
+        // Blockstore readahead
+        let large_readahead = false;
+
         // All errors must lead to marking the slot as dead, otherwise,
         // the `check_slot_agrees_with_cluster()` called by `replay_active_banks()`
         // will break!
@@ -2578,6 +2583,7 @@ impl ReplayStage {
                 .prioritization_fee_cache
                 .as_deref(),
             process_active_banks_context.migration_status.as_ref(),
+            large_readahead,
         )?;
         let tx_count_after = w_replay_progress.num_txs;
         let tx_count = tx_count_after - tx_count_before;

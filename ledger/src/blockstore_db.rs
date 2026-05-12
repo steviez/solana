@@ -361,13 +361,24 @@ impl Rocks {
         &self,
         cf: &ColumnFamily,
         keys: I,
+        large_readahead: bool,
     ) -> impl Iterator<Item = Result<Option<DBPinnableSlice<'_>>>> + use<'_, K, I>
     where
         K: AsRef<[u8]> + 'a + ?Sized,
         I: IntoIterator<Item = &'a K>,
     {
+        let mut options = rocksdb::ReadOptions::default();
+        if large_readahead {
+            // Adjust this value to tune
+            // Could possibly make sense to have caller pass integer instead
+            // value down instead of a bool. The caller might have more insight
+            // about how much data it'll be fetching. Ie, for fetching a full
+            // block, the SlotMeta has the number of shreds
+            options.set_readahead_size(1024 * 1024);
+        }
+
         self.db
-            .batched_multi_get_cf(cf, keys, /*sorted_input:*/ false)
+            .batched_multi_get_cf_opt(cf, keys, /*sorted_input:*/ false, &options)
             .into_iter()
             .map(|out| out.map_err(BlockstoreError::RocksDb))
     }
@@ -623,6 +634,7 @@ where
     pub(crate) fn multi_get_bytes<'a, K>(
         &'a self,
         keys: impl IntoIterator<Item = &'a K> + 'a,
+        large_readahead: bool,
     ) -> impl Iterator<Item = Result<Option<BlockstoreByteReference<'a>>>> + 'a
     where
         K: AsRef<[u8]> + 'a + ?Sized,
@@ -634,7 +646,7 @@ where
 
         let result = self
             .backend
-            .multi_get_cf(self.handle(), keys)
+            .multi_get_cf(self.handle(), keys, large_readahead)
             .map(|out| Ok(out?.map(BlockstoreByteReference::from)));
 
         if let Some(op_start_instant) = is_perf_enabled {
@@ -807,7 +819,7 @@ where
 
         let result = self
             .backend
-            .multi_get_cf(self.handle(), keys)
+            .multi_get_cf(self.handle(), keys, /*large_readahead:*/ false)
             .map(|out| out?.as_deref().map(C::deserialize).transpose());
 
         if let Some(op_start_instant) = is_perf_enabled {

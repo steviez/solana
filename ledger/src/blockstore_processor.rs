@@ -1130,6 +1130,7 @@ fn confirm_full_slot(
         }
     }
 
+    let large_readahead = true;
     confirm_slot(
         blockstore,
         bank,
@@ -1145,6 +1146,7 @@ fn confirm_full_slot(
         opts.runtime_config.log_messages_bytes_limit,
         None,
         migration_status,
+        large_readahead,
     )?;
 
     timing.accumulate(&confirmation_timing.batch_execute.totals);
@@ -1665,6 +1667,7 @@ pub fn confirm_slot(
     log_messages_bytes_limit: Option<usize>,
     prioritization_fee_cache: Option<&PrioritizationFeeCache>,
     migration_status: &MigrationStatus,
+    large_readahead: bool,
 ) -> result::Result<(), BlockstoreProcessorError> {
     match bank
         .feature_set
@@ -1700,6 +1703,7 @@ pub fn confirm_slot(
             log_messages_bytes_limit,
             prioritization_fee_cache,
             migration_status,
+            large_readahead,
         ),
     }
 }
@@ -1719,13 +1723,19 @@ fn confirm_slot_with_entries(
     log_messages_bytes_limit: Option<usize>,
     prioritization_fee_cache: Option<&PrioritizationFeeCache>,
     migration_status: &MigrationStatus,
+    large_readahead: bool,
 ) -> result::Result<(), BlockstoreProcessorError> {
     let slot = bank.slot();
 
     let slot_entries_load_result = {
         let mut load_elapsed = Measure::start("load_elapsed");
         let load_result = blockstore
-            .get_slot_entries_with_shred_info(slot, progress.num_shreds, allow_dead_slots)
+            .get_slot_entries_with_shred_info(
+                slot,
+                progress.num_shreds,
+                allow_dead_slots,
+                large_readahead,
+            )
             .map_err(BlockstoreProcessorError::FailedToLoadEntries);
         load_elapsed.stop();
         if load_result.is_err() {
