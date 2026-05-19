@@ -55,6 +55,15 @@ approval". Mentioning a specific user in a comment and asking for specific
 feedback may be appropriate to get approval on an idea before spending time to
 to fully polish the PR.
 
+### Pull Request Review
+
+#### Reviewers
+
+All PRs require at least one approval in order to merge. Reviews should be
+requested from people knowledgable on the component. The "correct" reviewer(s)
+may be automatically added as a CODEOWNER, suggested as a reviewer by GitHub, or
+can be determined with `git blame`. If in doubt, ask.
+
 ## Pull Request style
 
 Small, frequent PRs are much preferred to large, infrequent ones. A large PR is
@@ -138,9 +147,7 @@ may be pulled in through crates.io.
 
 ## Getting Pull Requests Merged
 
- Typically, you will ask the person that wrote a component
-to review changes to it. You can find the author using `git blame` or asking on
-Discord.  When working to get your PR merged, it's most important to understand
+When working to get your PR merged, it's most important to understand
 that changing the code is your priority and not necessarily a priority of the
 person you need an approval from. Also, while you may interact the most with
 the component author, you should aim to be inclusive of others. Providing a
