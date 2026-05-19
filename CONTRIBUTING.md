@@ -24,6 +24,18 @@ There is no single person assigned to watching GitHub for new PRs and ushering
 contributors through the process. Rather, it is the responsibility of the PR
 author to progress their PR along. The general process is outlined below.
 
+### Pull Request Prerequisites
+
+CI will kickoff immediately when a PR is created or updated. CI is a shared
+resource so the following sanity steps should be run locally *before* pushing a
+PR to avoid wasting/slowing down CI for everyone else:
+
+```bash
+$ ./ci/test-sanity.sh
+$ ./ci/test-checks.sh
+$ ./ci/feature-check/test-feature.sh
+```
+
 ## Pull Request style
 
 Small, frequent PRs are much preferred to large, infrequent ones. A large PR is
@@ -55,14 +67,6 @@ cherry-picked commit:
 
 ```bash
 $ git pull --rebase upstream master
-```
-
-Before pushing the code do not forget to run:
-
-```bash
-$ ./ci/test-sanity.sh
-$ ./ci/test-checks.sh
-$ ./ci/feature-check/test-feature.sh
 ```
 
 Any changes that break consensus must be behind a feature gate and must have
