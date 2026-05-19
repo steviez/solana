@@ -36,6 +36,25 @@ $ ./ci/test-checks.sh
 $ ./ci/feature-check/test-feature.sh
 ```
 
+### Draft Pull Requests
+
+Consider opening all PRs as draft PRs first. Using a draft PR allows CI to
+kickoff while you fill out the PR description and self-review the change.
+Additionally, draft PRs defer requesting reviews from any CODEOWNERS until the
+PR is marked "Ready to Review".
+
+Once the PR description is written and CI succeeds, click the "Ready to Review"
+button and add reviewers. Adding reviewers before CI succeeds will needlessly
+notify reviewers and diminish reviewer engagement. Don't bug the humans until
+you have gotten past the bots.
+
+If a PR has received a lot of feedback and needs substantial rework, feel free
+to convert the PR back to draft until issues are resolved and CI is green.
+Similarly, draft PRs provide a nice venue for discussion to get "directional
+approval". Mentioning a specific user in a comment and asking for specific
+feedback may be appropriate to get approval on an idea before spending time to
+to fully polish the PR.
+
 ## Pull Request style
 
 Small, frequent PRs are much preferred to large, infrequent ones. A large PR is
@@ -127,31 +146,6 @@ person you need an approval from. Also, while you may interact the most with
 the component author, you should aim to be inclusive of others. Providing a
 detailed problem description is the most effective means of engaging both the
 component author and other potentially interested parties.
-
-### Draft Pull Requests
-
-Consider opening all PRs as Draft Pull Requests first. Using a draft PR allows
-you to start the CI automation, review the changes, write a detailed problem
-description and explain your solution.
-
-Once the description is written and CI succeeds, click the "Ready to Review" button
-and add reviewers. Adding reviewers before CI succeeds is a fast path to losing
-reviewer engagement. Not only will they be notified and see the PR is not yet
-ready for them, they will also be bombarded with additional notifications
-each time you push a commit to get past CI or until they "mute" the PR. Once
-muted, you'll need to reach out over some other medium, such as Discord, to
-request they have another look. When you use draft PRs, no notifications are
-sent when you push commits and edit the PR description. Use draft PRs
-liberally.  Don't bug the humans until you have gotten past the bots.
-
-If your PR has received a lot of feedback and needs a lot of rework, feel free
-to convert it into a draft until issues are resolved and CI is green.
-
-Do not add reviewers to draft PRs.  GitHub doesn't automatically clear
-approvals when you click "Ready for Review", so a review that meant "I approve
-of the direction" suddenly has the appearance of "I approve of these changes."
-Instead, add a comment that mentions the usernames that you would like a review
-from. Ask explicitly what you would like feedback on.
 
 ### What should be in my PR description?
 
