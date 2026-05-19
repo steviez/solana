@@ -64,6 +64,15 @@ requested from people knowledgable on the component. The "correct" reviewer(s)
 may be automatically added as a CODEOWNER, suggested as a reviewer by GitHub, or
 can be determined with `git blame`. If in doubt, ask.
 
+#### Timeline
+
+It would be ideal if all PRs could be reviewed and merged very shortly after
+creation. However, it is important to remember that reviewers may be occupied
+with higher priority tasks than reviewing your PR. If a PR has green CI and is
+waiting for review for 7 days without feedback, it is acceptable to gently
+nudge the reviewer(s). Finally, keep in mind that PRs that are easier to review
+are more likely to be reviewed quickly.
+
 ## Pull Request style
 
 Small, frequent PRs are much preferred to large, infrequent ones. A large PR is
@@ -147,9 +156,7 @@ may be pulled in through crates.io.
 
 ## Getting Pull Requests Merged
 
-When working to get your PR merged, it's most important to understand
-that changing the code is your priority and not necessarily a priority of the
-person you need an approval from. Also, while you may interact the most with
+Also, while you may interact the most with
 the component author, you should aim to be inclusive of others. Providing a
 detailed problem description is the most effective means of engaging both the
 component author and other potentially interested parties.
@@ -234,14 +241,6 @@ qualified as "automerge".
 * "good first issue": If you happen to find an issue that is non-urgent and
 self-contained with moderate scope, you might want to consider attaching
 "good first issue" to it as it might be a good practice for newcomers.
-
-### When will my PR be reviewed?
-
-PRs are typically reviewed and merged in under 7 days. If your PR has been open
-for longer, it's a strong indicator that the reviewers aren't confident the
-change meets the quality standards of the codebase. You might consider closing
-it and coming back with smaller PRs and longer descriptions detailing what
-problem it solves and how it solves it.
 
 ### How to manage review feedback?
 
