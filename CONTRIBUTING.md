@@ -18,6 +18,11 @@ will be deemed consequential or not on a case by case basis. As an example,
 spelling and/or grammar fixes will almost always be considered inconsequential,
 unless they materially correct the message.
 
+## Pull Request Process
+
+There is no single person assigned to watching GitHub for new PRs and ushering
+contributors through the process. Rather, it is the responsibility of the PR
+author to progress their PR along. The general process is outlined below.
 
 ## Pull Request style
 
@@ -110,8 +115,7 @@ may be pulled in through crates.io.
 
 ## Getting Pull Requests Merged
 
-There is no single person assigned to watching GitHub PR queue and ushering you
-through the process. Typically, you will ask the person that wrote a component
+ Typically, you will ask the person that wrote a component
 to review changes to it. You can find the author using `git blame` or asking on
 Discord.  When working to get your PR merged, it's most important to understand
 that changing the code is your priority and not necessarily a priority of the
