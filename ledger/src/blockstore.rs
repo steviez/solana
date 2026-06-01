@@ -696,6 +696,26 @@ impl Blockstore {
         })
     }
 
+    /// Ensure the Blockstore will have graceful exit regardless of whether the
+    /// Blockstore actually gets dropped or not
+    pub(crate) fn teardown(&self) {
+        // If another thread panicked with the lock, clear the poisoned state
+        // and set the value (`disable_wal`) to `false`. Ensuring that the WAL
+        // is disabled will ensure that any future data will be available upon
+        // process restart regardless of whether memtables are flushed again
+        *self.insert_shreds_lock.lock().unwrap_or_else(|err|
+        {
+            warn!("shred insertion lock was poisoned, clearing to attempt recovery");
+            self.insert_shreds_lock.clear_poison();
+            err.into_inner()
+        }) = false;
+
+        // Flush all memtables to persist all in-memory data to disk
+        let _ = self.db.flush().inspect_err(|err| {
+            error!("blockstore flush encountered error: {err}");
+        });
+    }
+
     #[cfg(feature = "dev-context-only-utils")]
     pub fn add_tree(
         &self,

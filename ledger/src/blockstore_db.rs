@@ -326,6 +326,10 @@ impl Rocks {
         }
     }
 
+    pub(crate) fn flush(&self) -> Result<()> {
+        Ok(self.db.flush()?)
+    }
+
     pub(crate) fn destroy(path: &Path) -> Result<()> {
         DB::destroy(&Options::default(), path)?;
 
