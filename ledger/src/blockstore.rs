@@ -302,7 +302,17 @@ pub struct Blockstore {
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
 
     max_root: AtomicU64,
-    insert_shreds_lock: Mutex<()>,
+    // A lock to synchronize Blockstore data updates
+    //
+    // Shred insertion performs read-modify-write and write operations
+    // across multiple columns. While updates to columns are applied atomically
+    // through use of the rocksdb write batch API, there is no merge/reconcile
+    // logic to handle parallel updates. Thus, this lock ensures there is only
+    // a single writer to avoid race conditions
+    //
+    // If other logic needs to read-modify-write any of the columns updated by
+    // shred insertion, this lock should be obtained to avoid race conditions.
+    insert_shreds_lock: Mutex</*disable_wal:*/ bool>,
     new_shreds_signals: Mutex<Vec<Sender<bool>>>,
     completed_slots_senders: Mutex<Vec<CompletedSlotsSender>>,
     update_parent_signals: Mutex<Vec<UpdateParentSender>>,
@@ -574,6 +584,7 @@ impl Blockstore {
     fn do_open(ledger_path: &Path, options: BlockstoreOptions) -> Result<Blockstore> {
         fs::create_dir_all(ledger_path)?;
         let blockstore_path = ledger_path.join(BLOCKSTORE_DIRECTORY_ROCKS_LEVEL);
+        let disable_wal = options.disable_wal;
 
         // Open the database
         let mut measure = Measure::start("blockstore open");
@@ -652,7 +663,7 @@ impl Blockstore {
             update_parent_shred_parent_cache: Mutex::new(LruCache::new(
                 UPDATE_PARENT_SHRED_PARENT_CACHE_CAPACITY,
             )),
-            insert_shreds_lock: Mutex::<()>::default(),
+            insert_shreds_lock: Mutex::<bool>::new(disable_wal),
             max_root,
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             manual_purge_request_sender: Mutex::default(),
@@ -2134,7 +2145,7 @@ impl Blockstore {
     /// Core shred insertion logic.
     fn do_insert_shreds_locked<'a>(
         &self,
-        _insert_shreds_lock: &MutexGuard<'_, ()>,
+        insert_shreds_lock: &MutexGuard<'_, bool>,
         shreds: impl IntoIterator<
             Item = (Cow<'a, Shred>, /*is_repaired:*/ bool, BlockLocation),
             IntoIter: ExactSizeIterator,
@@ -2182,7 +2193,8 @@ impl Blockstore {
 
         // Write out the accumulated batch.
         let mut start = Measure::start("Write Batch");
-        self.write_batch(shred_insertion_tracker.write_batch)?;
+        let disable_wal = **insert_shreds_lock;
+        self.write_batch_with_options(shred_insertion_tracker.write_batch, disable_wal)?;
         start.stop();
         metrics.write_batch_elapsed_us += start.as_us();
 
@@ -2332,7 +2344,7 @@ impl Blockstore {
     /// Reads all data shreds from `from_location` and inserts them at `to_location`.
     fn copy_shreds_locked(
         &self,
-        lock: &std::sync::MutexGuard<'_, ()>,
+        lock: &std::sync::MutexGuard<'_, bool>,
         slot: Slot,
         from_location: BlockLocation,
         to_location: BlockLocation,
@@ -5943,7 +5955,15 @@ impl Blockstore {
     }
 
     pub fn write_batch(&self, write_batch: WriteBatch) -> Result<()> {
-        self.db.write(write_batch)
+        // The WAL provides extra guarantees in the event of a program crash
+        // Enable it for the general case to be safe; more advanced callers
+        // can disable if they so choose
+        const DISABLE_WAL: bool = false;
+        self.write_batch_with_options(write_batch, DISABLE_WAL)
+    }
+
+    fn write_batch_with_options(&self, write_batch: WriteBatch, disable_wal: bool) -> Result<()> {
+        self.db.write(write_batch, disable_wal)
     }
 
     #[cfg(feature = "dev-context-only-utils")]
