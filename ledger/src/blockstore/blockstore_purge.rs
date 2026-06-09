@@ -803,6 +803,12 @@ pub mod tests {
                 .is_empty(),
         );
 
+        // Ensure slots in [purged_range_from, purge_range_to) are empty;
+        // purge_range_to remains for sake of chaining (the check below)
+        for purged_slot in purge_range_from..purge_range_to {
+            assert!(blockstore.meta(purged_slot).unwrap().is_none());
+        }
+
         // Ensure purged parent with nonpurged child retains chaining
         let purge_range_to_meta = blockstore.meta(purge_range_to).unwrap().unwrap();
         assert_eq!(purge_range_to_meta.next_slots[0], purge_range_to + 1);
@@ -816,6 +822,15 @@ pub mod tests {
                 .unwrap(),
             purge_range_to
         );
+
+        // Purge to the end of the Blockstore and ensure all slots fully gone
+        let purge_range_to = 15;
+        blockstore
+            .purge_slots_cleanup_chaining(purge_range_from, purge_range_to, PurgeType::Exact)
+            .unwrap();
+        for purged_slot in purge_range_from..=purge_range_to {
+            assert!(blockstore.meta(purged_slot).unwrap().is_none());
+        }
     }
 
     #[test]
