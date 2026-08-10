@@ -329,7 +329,6 @@ impl Rocks {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn flush_all_columns(&self) -> Result<()> {
         // Block until the flushes are complete
         let mut flush_options = rocksdb::FlushOptions::new();
@@ -420,12 +419,16 @@ impl Rocks {
         })
     }
 
-    pub(crate) fn write(&self, batch: WriteBatch) -> Result<()> {
+    pub(crate) fn write(&self, batch: WriteBatch, disable_wal: bool) -> Result<()> {
         let op_start_instant = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.write_batch_perf_status,
         );
-        let result = self.db.write(batch.write_batch);
+
+        let mut options = rocksdb::WriteOptions::default();
+        options.disable_wal(disable_wal);
+        let result = self.db.write_opt(batch.write_batch, &options);
+
         if let Some(op_start_instant) = op_start_instant {
             report_rocksdb_write_perf(
                 PERF_METRIC_OP_NAME_WRITE_BATCH, // We use write_batch as cf_name for write batch.

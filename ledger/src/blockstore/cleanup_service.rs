@@ -116,6 +116,7 @@ impl BlockstoreCleanupService {
                     thread::sleep(Duration::from_secs(1));
                 }
 
+                blockstore.prepare_for_exit();
                 info!("BlockstoreCleanupService has stopped");
             })
             .unwrap();
