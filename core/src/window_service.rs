@@ -211,6 +211,7 @@ fn run_insert<'db, F>(
     thread_pool: &ThreadPool,
     verified_receiver: &Receiver<Vec<(shred::Payload, /*is_repaired:*/ bool, BlockLocation)>>,
     blockstore: &'db Blockstore,
+    shred_buffer: &mut Vec<(shred::Payload, /*is_repaired:*/ bool, BlockLocation)>,
     shred_recovery_context: &mut ShredRecoveryContext,
     pinnable_slice: &mut DBPinnableSlice<'db>,
     write_batch: &mut WriteBatch,
@@ -224,11 +225,19 @@ where
 {
     const RECV_TIMEOUT: Duration = Duration::from_millis(200);
     let mut shred_receiver_elapsed = Measure::start("shred_receiver_elapsed");
-    let mut shreds = verified_receiver.recv_timeout(RECV_TIMEOUT)?;
-    shreds.extend(verified_receiver.try_iter().flatten());
+    // TODO:
+    // - Double check upstream if there is a cap on how large any single item
+    //   from verified_receiver will be; below could over-extend
+    // - This won't compile because shred insertion requires owned shreds,
+    //   that probably isn't a hard requirement so will have to rework or might
+    //   be fine if we're using Bytes and clones of payloads are cheap
+    //   - If that isn't the case, update that first
+    shred_buffer.extend(verified_receiver.recv_timeout(RECV_TIMEOUT)?);
+    shred_buffer.extend(verified_receiver.try_iter().take(10));
     shred_receiver_elapsed.stop();
     ws_metrics.shred_receiver_elapsed_us += shred_receiver_elapsed.as_us();
     ws_metrics.run_insert_count += 1;
+
     let handle_shred = |(shred, repair, block_location): (shred::Payload, bool, BlockLocation)| {
         if repair {
             ws_metrics.num_repairs.fetch_add(1, Ordering::Relaxed);
@@ -443,6 +452,8 @@ impl WindowService {
                 );
                 let mut pinnable_slice = blockstore.new_pinnable_slice();
                 let mut write_batch = blockstore.get_write_batch();
+                // TODO: Measure and pick a better value
+                let mut shred_buffer = Vec::with_capacity(2048);
 
                 while !exit.load(Ordering::Relaxed) {
                     shred_recovery_context.maybe_update(sharable_banks.root());
@@ -451,6 +462,7 @@ impl WindowService {
                         &thread_pool,
                         &verified_receiver,
                         &blockstore,
+                        &mut shred_buffer,
                         &mut shred_recovery_context,
                         &mut pinnable_slice,
                         &mut write_batch,
