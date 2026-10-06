@@ -109,9 +109,10 @@ impl TransactionStatusService {
                     let mut metrics = Metrics::new();
                     info!("{} has started", Self::SERVICE_NAME);
                     loop {
-                        if exit.load(Ordering::Relaxed) {
-                            break;
-                        }
+                        // Intentionally do not check the exit flag. Instead,
+                        // rely on the transaction status channel to be
+                        // disconnected; this ensures that the channel is
+                        // drained before the thread exits
 
                         let message = match transaction_status_receiver
                             .recv_timeout(Duration::from_secs(1))
