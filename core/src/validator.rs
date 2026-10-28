@@ -2012,24 +2012,31 @@ impl Validator {
         drop(self.cluster_info);
 
         self.poh_service.join().expect("poh_service");
+        error!("poh dropped");
+
         self.block_creation_loop
             .join()
             .expect("block_creation_loop");
+        error!("block_creation_loop dropped");
+
         drop(self.poh_recorder);
 
         if let Some(json_rpc_service) = self.json_rpc_service {
             json_rpc_service.join().expect("rpc_service");
         }
+        error!("json_rpc_service dropped");
 
         if let Some(pubsub_service) = self.pubsub_service {
             pubsub_service.join().expect("pubsub_service");
         }
+        error!("pubsub_service dropped");
 
         if let Some(rpc_completed_slots_service) = self.rpc_completed_slots_service {
             rpc_completed_slots_service
                 .join()
                 .expect("rpc_completed_slots_service");
         }
+        error!("rpc_completed_slots_service dropped");
 
         if let Some(optimistically_confirmed_bank_tracker) =
             self.optimistically_confirmed_bank_tracker
@@ -2038,65 +2045,91 @@ impl Validator {
                 .join()
                 .expect("optimistically_confirmed_bank_tracker");
         }
+        error!("optimistically_confirmed_bank_tracker dropped");
 
         if let Some(transaction_status_service) = self.transaction_status_service {
             transaction_status_service
                 .join()
                 .expect("transaction_status_service");
         }
+        error!("transaction_status_service dropped");
 
         if let Some(system_monitor_service) = self.system_monitor_service {
             system_monitor_service
                 .join()
                 .expect("system_monitor_service");
         }
+        error!("system_monitor_service dropped");
 
         if let Some(sample_performance_service) = self.sample_performance_service {
             sample_performance_service
                 .join()
                 .expect("sample_performance_service");
         }
+        error!("sample_performance_service dropped");
 
         if let Some(entry_notifier_service) = self.entry_notifier_service {
             entry_notifier_service
                 .join()
                 .expect("entry_notifier_service");
         }
+        error!("entry_notifier_service dropped");
 
         self.snapshot_packager_service
             .join()
             .expect("snapshot_packager_service");
+        error!("snapshot_packager_service dropped");
 
         self.gossip_service.join().expect("gossip_service");
+        error!("gossip_service dropped");
+
         self.serve_repair_service
             .join()
             .expect("serve_repair_service");
+        error!("serve_repair_service dropped");
+
         self.stats_reporter_service
             .join()
             .expect("stats_reporter_service");
+        error!("stats_reporter_service dropped");
+
         self.blockstore_metric_report_service
             .join()
             .expect("ledger_metric_report_service");
+        error!("blockstore_metric_report_service dropped");
+
         self.accounts_background_service
             .join()
             .expect("accounts_background_service");
+        error!("accounts_background_service dropped");
+
         if let Some(xdp_transmitter) = self.xdp_transmitter {
             xdp_transmitter.join().expect("xdp_transmitter");
         }
+        error!("xdp_transmitter dropped");
+
         self.tpu.join().expect("tpu");
+        error!("tpu dropped");
+
         self.tvu.join().expect("tvu");
+        error!("tvu dropped");
+
         if let Some(completed_data_sets_service) = self.completed_data_sets_service {
             completed_data_sets_service
                 .join()
                 .expect("completed_data_sets_service");
         }
+        error!("completed_data_sets_service dropped");
+
         if let Some(ip_echo_server) = self.ip_echo_server {
             ip_echo_server.shutdown_background();
         }
+        error!("ip_echo_server dropped");
 
         if let Some(geyser_plugin_service) = self.geyser_plugin_service {
             geyser_plugin_service.join().expect("geyser_plugin_service");
         }
+        error!("geyser_plugin_service dropped");
     }
 }
 
