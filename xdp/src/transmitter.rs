@@ -660,7 +660,7 @@ fn route(
 impl Transmitter {
     pub fn join(self) -> thread::Result<()> {
         for handle in self.threads {
-            info!("Joining {:?}", handle.thread().name());
+            log::error!("Joining {:?}", handle.thread().name());
             handle.join()?;
         }
         Ok(())

@@ -400,23 +400,27 @@ impl Tpu {
 
     pub fn join(self) -> thread::Result<()> {
         let results = vec![
-            self.fetch_stage.join(),
-            self.cluster_info_vote_listener.join(),
-            self.sigverify_stage.join(),
-            self.banking_stage.join(),
-            self.forwarding_stage.join(),
-            self.staked_nodes_updater_service.join(),
-            self.tpu_quic_t.join(),
-            self.tpu_forwards_quic_t.join(),
-            self.tpu_vote_quic_t.join(),
+            (self.fetch_stage.join(), "fetch_stage"),
+            (self.cluster_info_vote_listener.join(), "cluster_info_vote_listener"),
+            (self.sigverify_stage.join(), "sigverify_stage"),
+            (self.banking_stage.join(), "banking_stage"),
+            (self.forwarding_stage.join(), "forwarding_stage"),
+            (self.staked_nodes_updater_service.join(), "staked_nodes_updater_service"),
+            (self.tpu_quic_t.join(), "tpu_quic_t"),
+            (self.tpu_forwards_quic_t.join(), "tpu_forwards_quic_t"),
+            (self.tpu_vote_quic_t.join(), "tpu_vote_quic_t"),
         ];
         let broadcast_result = self.broadcast_stage.join();
-        for result in results {
+        error!("broadcast_stage dropped");
+        for (result, thread) in results {
             result?;
+            error!("{thread} dropped");
         }
         if let Some(tpu_entry_notifier) = self.tpu_entry_notifier {
             tpu_entry_notifier.join()?;
         }
+        error!("tpu_entry_notifier dropped");
+
         let _ = broadcast_result?;
         Ok(())
     }
