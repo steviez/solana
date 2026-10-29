@@ -1355,18 +1355,12 @@ impl ClusterInfo {
         stakes: &HashMap<Pubkey, u64>,
     ) -> impl Iterator<Item = (SocketAddr, Protocol)> + use<> {
         let self_id = self.id();
-        let is_full_alpenglow_epoch = self.is_full_alpenglow_epoch();
         let (entries, push_messages, num_pushes) = {
             let _st = ScopedTimer::from(&self.stats.new_push_requests);
             self.flush_push_queue();
             self.gossip
                 .new_push_messages(&self_id, timestamp(), stakes, |value| {
-                    should_retain_crds_value(
-                        value,
-                        stakes,
-                        GossipFilterDirection::EgressPush,
-                        is_full_alpenglow_epoch,
-                    )
+                    should_retain_crds_value(value, stakes, GossipFilterDirection::EgressPush)
                 })
         };
         self.stats
@@ -1747,7 +1741,6 @@ impl ClusterInfo {
         });
         let now = timestamp();
         let self_id = self.id();
-        let is_full_alpenglow_epoch = self.is_full_alpenglow_epoch();
         let pull_responses = {
             let _st = ScopedTimer::from(&self.stats.generate_pull_responses);
             self.gossip.generate_pull_responses(
@@ -1759,7 +1752,6 @@ impl ClusterInfo {
                         value,
                         stakes,
                         GossipFilterDirection::EgressPullResponse,
-                        is_full_alpenglow_epoch,
                     )
                 },
                 |request, scan_entries| {
@@ -2225,7 +2217,6 @@ impl ClusterInfo {
             stakes: &HashMap<Pubkey, u64>,
             stats: &GossipStats,
             sigverify_cache: &SigVerifyCache,
-            is_full_alpenglow_epoch: bool,
         ) -> Option<(SocketAddr, Protocol)> {
             let result: wincode::ReadResult<Protocol> = packet
                 .data(..)
@@ -2237,12 +2228,7 @@ impl ClusterInfo {
                 &mut protocol
             {
                 values.retain(|value| {
-                    should_retain_crds_value(
-                        value,
-                        stakes,
-                        GossipFilterDirection::Ingress,
-                        is_full_alpenglow_epoch,
-                    )
+                    should_retain_crds_value(value, stakes, GossipFilterDirection::Ingress)
                 });
                 if values.is_empty() {
                     return None;
@@ -2256,7 +2242,6 @@ impl ClusterInfo {
         let stakes = epoch_specs
             .map(|es| es.current_epoch_staked_nodes())
             .unwrap_or_default();
-        let is_full_alpenglow_epoch = self.is_full_alpenglow_epoch();
         let packets_verified: Vec<_> = {
             let _st = ScopedTimer::from(&self.stats.verify_gossip_packets_time);
             thread_pool.install(|| {
@@ -2264,13 +2249,7 @@ impl ClusterInfo {
                     packet_buf[0]
                         .par_iter()
                         .filter_map(|packet| {
-                            verify_packet(
-                                packet,
-                                &stakes,
-                                &self.stats,
-                                &self.sigverify_cache,
-                                is_full_alpenglow_epoch,
-                            )
+                            verify_packet(packet, &stakes, &self.stats, &self.sigverify_cache)
                         })
                         .collect()
                 } else {
@@ -2278,13 +2257,7 @@ impl ClusterInfo {
                         .par_iter()
                         .flatten()
                         .filter_map(|packet| {
-                            verify_packet(
-                                packet,
-                                &stakes,
-                                &self.stats,
-                                &self.sigverify_cache,
-                                is_full_alpenglow_epoch,
-                            )
+                            verify_packet(packet, &stakes, &self.stats, &self.sigverify_cache)
                         })
                         .collect()
                 }
