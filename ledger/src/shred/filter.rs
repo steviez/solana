@@ -518,6 +518,9 @@ pub struct ShredRecoveryContext {
     retransmit_sender: EvictingSender<Vec<Payload>>,
     /// Used for filtering recovered shreds
     shred_filter_ctx: ShredFilterContext,
+    /// Scratch space for the parity check of erasure batches, reused across
+    /// recoveries.
+    parity_buffer: Vec<u8>,
 }
 
 impl ShredRecoveryContext {
@@ -530,6 +533,7 @@ impl ShredRecoveryContext {
         Self {
             retransmit_sender,
             shred_filter_ctx,
+            parity_buffer: Vec::new(),
         }
     }
 
@@ -577,7 +581,7 @@ impl ShredRecoveryContext {
             .filter(|shred| !self.shred_filter_ctx.should_discard_shred(shred.payload()))
             .collect();
 
-        merkle::rebuild_erasure_batch(shreds)
+        merkle::rebuild_erasure_batch_with_buffer(shreds, &mut self.parity_buffer)
     }
 
     /// Checks the reconstructed shreds of the erasure batch.
