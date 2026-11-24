@@ -1795,6 +1795,15 @@ impl Validator {
     /// Monitor registered signal handlers and the validator's exit flag
     pub fn listen_for_signals(&self) -> Result<()> {
         info!("Validator::listen_for_signals() has started");
+
+        #[cfg(unix)]
+        {
+            // Setup signals handlers so SIGINT and SIGTERM initiate a graceful
+            // validator exit
+            signal_hook::flag::register(libc::SIGINT, self.exit.clone())?;
+            signal_hook::flag::register(libc::SIGTERM, self.exit.clone())?;
+        }
+
         loop {
             if self.exit.load(Ordering::Relaxed) {
                 break;
